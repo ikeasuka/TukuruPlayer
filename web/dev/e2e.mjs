@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { chromium } = require("playwright");
+const pw = require("playwright");
+const browserName = process.env.TKR_BROWSER || "chromium";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const game = process.argv[2] || path.join(here, "testgame");
 const shot = process.argv[3] || path.join(here, "shot");
@@ -17,11 +18,15 @@ const serverLog = [];
 server.stdout.on("data", (d) => serverLog.push(String(d)));
 await new Promise((r) => setTimeout(r, 800));
 
-const browser = await chromium.launch({ args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
+const browser = browserName === "chromium"
+  ? await pw.chromium.launch({ args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"] })
+  : await pw[browserName].launch();
+console.log("browser:", browserName, browser.version());
 const page = await browser.newPage({ viewport: { width: 1088, height: 832 } });
 const logs = [];
 page.on("console", (m) => logs.push(m.text()));
 page.on("pageerror", (e) => logs.push("PAGEERROR " + e.message));
+page.on("crash", () => logs.push("PAGEERROR page crashed"));
 await page.goto(`http://localhost:${port}/`);
 const t0 = Date.now();
 let ok = false;
@@ -48,7 +53,7 @@ await new Promise((r) => setTimeout(r, 400));
 await page.screenshot({ path: shot + "-2.png" });
 await page.keyboard.up("KeyA");
 const fps = await page.evaluate(() => document.getElementById("fps").textContent);
-console.log(logs.filter((l) => l.startsWith("TEST") || l.includes("ERROR") || l.includes("rror")).join("\n"));
+console.log(logs.filter((l) => l.startsWith("TEST") || l.startsWith("[stage]") || l.includes("ERROR") || l.includes("rror")).join("\n"));
 if (await page.locator("#overlay").isVisible()) console.log("OVERLAY:", await page.locator("#overlay").innerText());
 console.log("fps:", fps);
 console.log(serverLog.join("").split("\n").filter((l) => l.includes("[save]")).slice(0, 5).join("\n"));

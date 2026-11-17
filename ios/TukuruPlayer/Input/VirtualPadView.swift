@@ -40,16 +40,47 @@ final class VirtualPadView: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    /// Area of the screen showing the game; controls are placed outside of it when there is room.
+    var gameRect: CGRect = .zero { didSet { if gameRect != oldValue { setNeedsLayout() } } }
+
     override func layoutSubviews() {
         super.layoutSubviews()
-        let shortSide: CGFloat = min(bounds.width, bounds.height)
-        let s: CGFloat = padScale * min(1.25, max(0.8, shortSide / 390))
         let inset = safeAreaInsets
-        let bottom: CGFloat = bounds.height - max(inset.bottom, 12) - 24 * s
+        let W = bounds.width, H = bounds.height
+        let portrait = H > W
+        var s: CGFloat
+        var dc: CGPoint   // D-pad center
+        var bc: CGPoint   // action buttons center
+        let leftMargin = gameRect.minX - inset.left
+        let rightMargin = W - inset.right - gameRect.maxX
+        let below = H - max(inset.bottom, 8) - gameRect.maxY
+        if !gameRect.isEmpty && portrait && below >= 150 {
+            // Portrait: controls in the black area below the game
+            let top = gameRect.maxY + 6
+            let bottom = H - max(inset.bottom, 8)
+            let h = bottom - top
+            s = min(h / 230, (W - inset.left - inset.right) / 340, 1.35) * padScale
+            s = max(0.55, s)
+            let cy = (top + bottom) / 2 + 22 * s
+            dc = CGPoint(x: max(inset.left + 16 + 66 * s, W * 0.27), y: cy)
+            bc = CGPoint(x: min(W - inset.right - 16 - 79 * s, W * 0.73), y: cy)
+        } else if !gameRect.isEmpty && !portrait && min(leftMargin, rightMargin) >= 120 {
+            // Landscape: D-pad in the left margin, buttons in the right margin
+            let m = min(leftMargin, rightMargin)
+            s = max(0.55, min(m / 175, H / 300, 1.35) * padScale)
+            let bottom = H - max(inset.bottom, 12)
+            dc = CGPoint(x: inset.left + leftMargin / 2, y: bottom - 66 * s - 24 * s)
+            bc = CGPoint(x: gameRect.maxX + rightMargin / 2, y: bottom - 70 * s - 20 * s)
+        } else {
+            // Not enough room: overlay on the bottom corners
+            let shortSide: CGFloat = min(W, H)
+            s = padScale * min(1.25, max(0.8, shortSide / 390))
+            let bottom: CGFloat = H - max(inset.bottom, 12) - 24 * s
+            dc = CGPoint(x: max(inset.left, 12) + 24 * s + 66 * s, y: bottom - 66 * s)
+            bc = CGPoint(x: W - max(inset.right, 12) - 94 * s, y: bottom - 70 * s)
+        }
         dpadRadius = 66 * s
-        dpadCenter = CGPoint(x: max(inset.left, 12) + 24 * s + dpadRadius, y: bottom - dpadRadius)
-        let bcx: CGFloat = bounds.width - max(inset.right, 12) - 94 * s
-        let bc = CGPoint(x: bcx, y: bottom - 70 * s)
+        dpadCenter = dc
         let off = 50 * s
         let r = 29 * s
         func place(_ i: Int, _ p: CGPoint, _ rad: CGFloat) { keys[i].center = p; keys[i].radius = rad }

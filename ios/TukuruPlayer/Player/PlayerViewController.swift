@@ -21,6 +21,9 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
     private var lastSentMask: UInt32 = .max
     private var observers: [NSObjectProtocol] = []
     private var closed = false
+    private lazy var log = GameLog(gameID: game.id)
+    /// Game resolution (reported by the runtime on Graphics.resize_screen).
+    private var gameSize = CGSize(width: 544, height: 416)
 
     init(game: GameEntry) {
         self.game = game
@@ -51,7 +54,6 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         config.mediaTypesRequiringUserActionForPlayback = []
         config.suppressesIncrementalRendering = false
         webView = WKWebView(frame: view.bounds, configuration: config)
-        webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         webView.isOpaque = false
         webView.backgroundColor = .black
         webView.scrollView.backgroundColor = .black
@@ -76,16 +78,9 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
 
         menuButton.setImage(UIImage(systemName: "line.3.horizontal.circle"), for: .normal)
         menuButton.tintColor = UIColor(white: 1, alpha: 0.6)
-        menuButton.translatesAutoresizingMaskIntoConstraints = false
         menuButton.addTarget(self, action: #selector(showPauseMenu), for: .touchUpInside)
         menuButton.accessibilityLabel = "メニュー"
         view.addSubview(menuButton)
-        NSLayoutConstraint.activate([
-            menuButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 6),
-            menuButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -10),
-            menuButton.widthAnchor.constraint(equalToConstant: 40),
-            menuButton.heightAnchor.constraint(equalToConstant: 40),
-        ])
         menuButton.contentVerticalAlignment = .fill
         menuButton.contentHorizontalAlignment = .fill
 
@@ -124,6 +119,36 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         applySettings()
         webView.load(URLRequest(url: SchemeHandler.startURL))
         game.markPlayed()
+    }
+
+    /// Game area: full width at the top in portrait (controls go below), centered in landscape.
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let b = view.bounds
+        let safe = b.inset(by: view.safeAreaInsets)
+        let aspect = gameSize.width / max(1, gameSize.height)
+        let game: CGRect
+        if b.height > b.width {
+            let w = safe.width
+            let h = min(safe.height, (w / aspect).rounded())
+            game = CGRect(x: safe.minX, y: safe.minY, width: w, height: h)
+        } else {
+            let h = safe.height
+            let w = min(safe.width, (h * aspect).rounded())
+            game = CGRect(x: (b.width - w) / 2, y: safe.minY, width: w, height: h)
+        }
+        if webView.frame != game { webView.frame = game }
+        pad.frame = b
+        pad.gameRect = game
+        // menu button: outside of the game area when possible
+        let size: CGFloat = 40
+        if b.height > b.width {
+            menuButton.frame = CGRect(x: safe.maxX - size - 10, y: game.maxY + 8, width: size, height: size)
+        } else if b.width - game.maxX - view.safeAreaInsets.right >= size + 16 {
+            menuButton.frame = CGRect(x: safe.maxX - size - 10, y: safe.minY + 8, width: size, height: size)
+        } else {
+            menuButton.frame = CGRect(x: safe.maxX - size - 6, y: safe.minY + 6, width: size, height: size)
+        }
     }
 
     deinit {
@@ -241,11 +266,16 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         case "exit":
             close()
         case "error":
-            NSLog("[TukuruPlayer] game error: \(body["title"] ?? "") \(body["text"] ?? "")")
+            log.add("ERROR \(body["title"] ?? "") \(body["text"] ?? "")")
         case "log":
-            #if DEBUG
-            NSLog("[game] \(body["text"] ?? "")")
-            #endif
+            log.add("\(body["level"] ?? "info"): \(body["text"] ?? "")")
+        case "stage":
+            log.stage(body["name"] as? String ?? "")
+        case "resolution":
+            if let w = body["w"] as? Int, let h = body["h"] as? Int, w > 0, h > 0 {
+                gameSize = CGSize(width: w, height: h)
+                view.setNeedsLayout()
+            }
         default:
             break
         }
@@ -254,14 +284,32 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
     // MARK: WKNavigationDelegate / WKUIDelegate
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        log.add("!!! web content process terminated")
         let alert = UIAlertController(title: "ゲームが終了しました",
-                                      message: "メモリ不足などによりゲームの実行が停止しました。",
+                                      message: "ゲームの実行が停止しました（メモリ不足など）。\n\n最後の処理: \(log.lastStage)\n\n"
+                                        + log.tail(6),
                                       preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "再起動", style: .default) { _ in
+        alert.addAction(UIAlertAction(title: "再起動", style: .default) { [weak self] _ in
+            self?.log.stage("restart")
             webView.load(URLRequest(url: SchemeHandler.startURL))
+        })
+        alert.addAction(UIAlertAction(title: "ログを共有", style: .default) { [weak self] _ in
+            self?.shareLog()
         })
         alert.addAction(UIAlertAction(title: "ライブラリに戻る", style: .cancel) { [weak self] _ in self?.close() })
         present(alert, animated: true)
+    }
+
+    private func shareLog() {
+        let vc = UIActivityViewController(activityItems: [log.fileURL], applicationActivities: nil)
+        vc.popoverPresentationController?.sourceView = view
+        vc.popoverPresentationController?.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
+        vc.completionWithItemsHandler = { [weak self] _, _, _, _ in
+            // offer the crash dialog again
+            guard let self, let wv = self.webView else { return }
+            self.webViewWebContentProcessDidTerminate(wv)
+        }
+        present(vc, animated: true)
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,

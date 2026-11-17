@@ -22,6 +22,12 @@ export const Host = {
     }
   },
 
+  // Startup / progress markers: shown by the app if the web process crashes.
+  stage(name) {
+    console.log("[stage] " + name);
+    if (ios) this.post({ type: "stage", name: String(name).slice(0, 300) });
+  },
+
   log(level, text) {
     if (level === "error") console.error(text);
     else console.log(text);

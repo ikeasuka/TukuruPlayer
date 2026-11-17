@@ -96,9 +96,14 @@ function lookup(rootMap, path) {
 }
 
 // ---------------------------------------------------------------------------
+window.addEventListener("error", (e) => Host.log("error", "JS error: " + (e.message || e) + " @" + (e.filename || "") + ":" + (e.lineno || "")));
+window.addEventListener("unhandledrejection", (e) => Host.log("error", "Unhandled rejection: " + ((e.reason && e.reason.stack) || e.reason)));
+
 async function main() {
   const loading = $("loading");
+  Host.stage("page loaded");
   const boot = await (await fetch(Host.gameURL("__boot.json"))).json();
+  Host.stage(`boot info: engine=${boot.engine} files=${(boot.files || []).length} preload=${Object.keys(boot.preload || {}).length}`);
   const engine = boot.engine === 2 ? 2 : 3;
   const settings = boot.settings || {};
   document.title = boot.title || "TukuruPlayer";
@@ -128,6 +133,7 @@ async function main() {
 
   // ---- fonts shipped with the game -------------------------------------------
   const fontFiles = (boot.files || []).filter((f) => /^fonts\/.+\.(ttf|otf|ttc)$/i.test(f));
+  Host.stage(`fonts: ${fontFiles.length}`);
   await Promise.all(fontFiles.map((f) => bitmaps.loadFont(f)));
 
   // ---- frame pacing -------------------------------------------------------------
@@ -173,6 +179,7 @@ async function main() {
   ], { debug: false });
 
   loading.textContent = "Ruby を起動中…";
+  Host.stage("compiling ruby.wasm");
   let module;
   try {
     module = await WebAssembly.compileStreaming(fetch("ruby.wasm"));
@@ -180,10 +187,16 @@ async function main() {
     const buf = await (await fetch("ruby.wasm")).arrayBuffer();
     module = await WebAssembly.compile(buf);
   }
-  const { vm } = await RubyVM.instantiateModule({
+  const { vm, instance } = await RubyVM.instantiateModule({
     module, wasip1: wasi,
     args: ["ruby.wasm", "--disable-gems", "-W0", "-EUTF-8", "-e_=0"],
   });
+  Host.stage("ruby vm ready");
+  const wasmMemory = instance ? instance.exports.memory : null;
+  const memMB = () => {
+    try { return wasmMemory ? Math.round(wasmMemory.buffer.byteLength / 1048576) : -1; } catch (e) { return -1; }
+  };
+  let frameNo = 0;
 
   // ---- API exposed to Ruby ----------------------------------------------------------
   const audio = (op, ...args) => Host.post({ type: "audio", op, args });
@@ -218,7 +231,14 @@ async function main() {
     tableUpload: (id, b64, xs, ys, zs) => scene.uploadTable(id, b64, xs, ys, zs),
     tableFree: (id) => scene.freeTable(id),
     // graphics
-    render: (list) => { scene.render(list); renderer.present(); },
+    render: (list) => {
+      scene.render(list);
+      renderer.present();
+      frameNo++;
+      if (frameNo === 1 || frameNo % 600 === 0) {
+        Host.stage(`frame ${frameNo}: wasm ${memMB()}MB, bitmaps ${bitmaps.map.size}`);
+      }
+    },
     frame: () => new Promise((resolve) => {
       if (resetRequested) { resetRequested = false; resolve("reset"); return; }
       frameWaiter = () => {
@@ -244,7 +264,7 @@ async function main() {
       const px = renderer.snapshotPixels();
       return bitmaps.fromPixels(renderer.width, renderer.height, px);
     },
-    resize: (w, h) => { renderer.resize(w, h); layout(); },
+    resize: (w, h) => { renderer.resize(w, h); layout(); Host.post({ type: "resolution", w, h }); },
     // input
     inputUpdate: () => input.update(),
     // audio (played natively)
@@ -297,6 +317,7 @@ async function main() {
       Host.post({ type: "error", title, text });
     },
     ready: () => { loading.style.display = "none"; Host.post({ type: "ready" }); },
+    stage: (name) => Host.stage(name),
   };
 
   // ---- callbacks from native ---------------------------------------------------------
@@ -316,6 +337,7 @@ async function main() {
 
   // ---- load the RGSS implementation and run the game -----------------------------
   loading.textContent = "ゲームを読み込み中…";
+  Host.stage("loading RGSS runtime");
   vm.eval(`$TKR_ENGINE = ${engine}`);
   for (const name of Object.keys(RB_SOURCES).sort()) {
     if (engine === 3 && name.startsWith("rpg2")) continue;
@@ -327,6 +349,7 @@ async function main() {
       return;
     }
   }
+  Host.stage(`runtime loaded (wasm ${memMB()}MB)`);
   try {
     await vm.evalAsync("TKRBoot.run");
   } catch (e) {

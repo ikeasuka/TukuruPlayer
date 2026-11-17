@@ -47,12 +47,14 @@ module TKRBoot
         code = code.encode('UTF-8', 'Shift_JIS', invalid: :replace, undef: :replace) unless code.valid_encoding?
         s[3] = code
       end
+      TKRCore.call(:stage, "scripts loaded: #{scripts.size}")
       TKRCore.call(:ready)
       loop do
         begin
           scripts.each do |s|
             name = s[1].to_s.dup.force_encoding(Encoding::UTF_8)
             name = name.scrub('?')
+            TKRCore.call(:stage, "script: #{name}")
             eval(s[3], TOPLEVEL_BINDING, name.empty? ? '(untitled)' : name, 1)
           end
           break
