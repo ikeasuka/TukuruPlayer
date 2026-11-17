@@ -333,8 +333,10 @@ class Font
     attr_accessor :default_name, :default_size, :default_bold, :default_italic,
                   :default_shadow, :default_outline, :default_color, :default_out_color
 
-    def exist?(name)
-      TKRCore.int(:fontExists, name.to_s) != 0
+    # Missing fonts fall back to the system Japanese font, so report every font as present
+    # (VX's default Main script exits when "UmePlus Gothic" is not found).
+    def exist?(_name)
+      true
     end
   end
 
