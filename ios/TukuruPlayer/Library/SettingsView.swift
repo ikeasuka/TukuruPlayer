@@ -6,16 +6,16 @@ struct SettingsView: View {
     @EnvironmentObject private var library: GameLibrary
     @Environment(\.dismiss) private var dismiss
 
-    @AppStorage(Settings.Key.padMode) private var padMode = "auto"
-    @AppStorage(Settings.Key.padOpacity) private var padOpacity = 0.55
-    @AppStorage(Settings.Key.padScale) private var padScale = 1.0
-    @AppStorage(Settings.Key.padHaptics) private var padHaptics = true
-    @AppStorage(Settings.Key.smooth) private var smooth = false
-    @AppStorage(Settings.Key.scaleMode) private var scaleMode = "fit"
-    @AppStorage(Settings.Key.showFPS) private var showFPS = false
-    @AppStorage(Settings.Key.ignoreSilent) private var ignoreSilent = false
+    @AppStorage(AppSettings.Key.padMode) private var padMode = "auto"
+    @AppStorage(AppSettings.Key.padOpacity) private var padOpacity = 0.55
+    @AppStorage(AppSettings.Key.padScale) private var padScale = 1.0
+    @AppStorage(AppSettings.Key.padHaptics) private var padHaptics = true
+    @AppStorage(AppSettings.Key.smooth) private var smooth = false
+    @AppStorage(AppSettings.Key.scaleMode) private var scaleMode = "fit"
+    @AppStorage(AppSettings.Key.showFPS) private var showFPS = false
+    @AppStorage(AppSettings.Key.ignoreSilent) private var ignoreSilent = false
 
-    @State private var mapping = Settings.mapping
+    @State private var mapping = AppSettings.mapping
     @State private var rtpTarget: Int?
     @State private var showRTPImporter = false
     @State private var showSoundFontImporter = false
@@ -33,9 +33,9 @@ struct SettingsView: View {
                     HStack {
                         Text("ボタン配置")
                         Spacer()
-                        Button("下で決定") { mapping = .standard; Settings.mapping = mapping }
+                        Button("下で決定") { mapping = .standard; AppSettings.mapping = mapping }
                             .buttonStyle(.bordered)
-                        Button("右で決定") { mapping = .japanese; Settings.mapping = mapping }
+                        Button("右で決定") { mapping = .japanese; AppSettings.mapping = mapping }
                             .buttonStyle(.bordered)
                     }
                     NavigationLink("ボタン割り当てを編集") { MappingEditor(mapping: $mapping) }
@@ -156,7 +156,7 @@ private struct MappingEditor: View {
             Section {
                 Button("初期設定に戻す", role: .destructive) {
                     mapping = .standard
-                    Settings.mapping = mapping
+                    AppSettings.mapping = mapping
                 }
             }
         }
@@ -173,7 +173,7 @@ private struct MappingEditor: View {
                     if n == .a { list.append(.shift) }
                 }
                 mapping.buttons[pad] = list
-                Settings.mapping = mapping
+                AppSettings.mapping = mapping
             }
         )
     }

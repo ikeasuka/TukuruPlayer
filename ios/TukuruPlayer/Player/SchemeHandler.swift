@@ -50,7 +50,7 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
             if path.hasPrefix("/game/") {
                 let rel = String(path.dropFirst("/game/".count))
                 if rel == "__boot.json" {
-                    body = self.fs.bootInfo(settings: Settings.webSettings)
+                    body = self.fs.bootInfo(settings: AppSettings.webSettings)
                     mime = "application/json"
                 } else if let item = self.fs.resolve(rel) {
                     body = try? self.fs.data(for: item)

@@ -5,7 +5,7 @@ struct TukuruPlayerApp: App {
     @StateObject private var library: GameLibrary
 
     init() {
-        Settings.registerDefaults()
+        AppSettings.registerDefaults()
         _library = StateObject(wrappedValue: GameLibrary())
     }
 

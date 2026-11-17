@@ -31,11 +31,11 @@ struct LibraryView: View {
             }
             .navigationTitle("TukuruPlayer")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .navigationBarLeading) {
                     Button { showSettings = true } label: { Image(systemName: "gearshape") }
                         .accessibilityLabel("設定")
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
                         Button { showFolderImporter = true } label: { Label("フォルダから追加", systemImage: "folder") }
                         Button { showZipImporter = true } label: { Label("ZIP から追加", systemImage: "doc.zipper") }

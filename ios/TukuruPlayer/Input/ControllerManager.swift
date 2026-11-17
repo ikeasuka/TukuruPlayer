@@ -17,7 +17,7 @@ final class ControllerManager {
 
     private(set) var padMask: UInt32 = 0
     private(set) var keyboardMask: UInt32 = 0
-    private var mapping = Settings.mapping
+    private var mapping = AppSettings.mapping
     private var pressedKeys = Set<GCKeyCode>()
     private var observers: [NSObjectProtocol] = []
     private var lastMenuMask: UInt32 = 0
@@ -53,7 +53,7 @@ final class ControllerManager {
     }
 
     func reloadMapping() {
-        mapping = Settings.mapping
+        mapping = AppSettings.mapping
         recompute()
     }
 

@@ -6,14 +6,14 @@ import Foundation
 /// WAV / MP3 / M4A with AVAudioFile, MIDI with AVMIDIPlayer + a user supplied SoundFont.
 final class GameAudio {
     private let fs: GameFileSystem
-    private let engine = AVAudioEngine()
+    private let engine: AVAudioEngine
     private let q = DispatchQueue(label: "tkr.audio", qos: .userInitiated)
     private let decodeQ = DispatchQueue(label: "tkr.audio.decode", qos: .userInitiated, attributes: .concurrent)
 
-    private let bgm: Channel
-    private let bgs: Channel
-    private let me: Channel
-    private var ses: [Channel] = []
+    private let bgm: AudioChannel
+    private let bgs: AudioChannel
+    private let me: AudioChannel
+    private var ses: [AudioChannel] = []
     private var seNext = 0
     private var seCache: [String: Decoded] = [:]
     private var seCacheOrder: [String] = []
@@ -37,10 +37,12 @@ final class GameAudio {
 
     init(fs: GameFileSystem) {
         self.fs = fs
-        bgm = Channel(engine: engine)
-        bgs = Channel(engine: engine)
-        me = Channel(engine: engine)
-        for _ in 0..<12 { ses.append(Channel(engine: engine)) }
+        let eng = AVAudioEngine()
+        engine = eng
+        bgm = AudioChannel(engine: eng)
+        bgs = AudioChannel(engine: eng)
+        me = AudioChannel(engine: eng)
+        for _ in 0..<12 { ses.append(AudioChannel(engine: eng)) }
         configureSession()
         q.async { self.startEngine() }
         let t = DispatchSource.makeTimerSource(queue: q)
@@ -76,7 +78,7 @@ final class GameAudio {
 
     private func configureSession() {
         let s = AVAudioSession.sharedInstance()
-        let ignore = Settings.defaults.bool(forKey: Settings.Key.ignoreSilent)
+        let ignore = AppSettings.defaults.bool(forKey: AppSettings.Key.ignoreSilent)
         try? s.setCategory(ignore ? .playback : .soloAmbient, mode: .default, options: [])
         try? s.setActive(true)
     }
@@ -255,7 +257,7 @@ final class GameAudio {
         bgmIsMidi = false
     }
 
-    private func playLoop(_ ch: Channel, _ name: String, volume: Int, pitch: Int, pos: Int) {
+    private func playLoop(_ ch: AudioChannel, _ name: String, volume: Int, pitch: Int, pos: Int) {
         q.async {
             if ch.name == name && ch.isActive {
                 ch.setVolume(volume, pitch: pitch)
@@ -379,9 +381,9 @@ final class GameAudio {
     }
 }
 
-// MARK: - Channel (one AVAudioPlayerNode + varispeed for pitch)
+// MARK: - AudioChannel (one AVAudioPlayerNode + varispeed for pitch)
 
-final class Channel {
+final class AudioChannel {
     let player = AVAudioPlayerNode()
     let speed = AVAudioUnitVarispeed()
     private weak var engine: AVAudioEngine?

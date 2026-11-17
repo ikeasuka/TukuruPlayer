@@ -87,7 +87,7 @@ struct ControllerMapping: Codable, Equatable {
 }
 
 /// App-wide settings stored in UserDefaults.
-enum Settings {
+enum AppSettings {
     static let defaults = UserDefaults.standard
 
     enum Key {

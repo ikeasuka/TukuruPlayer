@@ -133,20 +133,20 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
     // MARK: settings / input
 
     private func applySettings() {
-        let d = Settings.defaults
-        pad.alpha = CGFloat(d.double(forKey: Settings.Key.padOpacity))
-        pad.haptics = d.bool(forKey: Settings.Key.padHaptics)
-        pad.padScale = CGFloat(max(0.6, d.double(forKey: Settings.Key.padScale)))
+        let d = AppSettings.defaults
+        pad.alpha = CGFloat(d.double(forKey: AppSettings.Key.padOpacity))
+        pad.haptics = d.bool(forKey: AppSettings.Key.padHaptics)
+        pad.padScale = CGFloat(max(0.6, d.double(forKey: AppSettings.Key.padScale)))
         controllers.reloadMapping()
         applyPadVisibility()
-        if let json = try? JSONSerialization.data(withJSONObject: Settings.webSettings),
+        if let json = try? JSONSerialization.data(withJSONObject: AppSettings.webSettings),
            let s = String(data: json, encoding: .utf8) {
             webView?.evaluateJavaScript("window.TKRNative&&TKRNative.settings(\(s))", completionHandler: nil)
         }
     }
 
     private func applyPadVisibility() {
-        let mode = Settings.defaults.string(forKey: Settings.Key.padMode) ?? "auto"
+        let mode = AppSettings.defaults.string(forKey: AppSettings.Key.padMode) ?? "auto"
         let show: Bool
         switch mode {
         case "always": show = true
@@ -205,7 +205,7 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
             webView.evaluateJavaScript("window.TKRNative&&TKRNative.reset()", completionHandler: nil)
         case .togglePad:
             let showing = !pad.isHidden
-            Settings.defaults.set(showing ? "never" : "always", forKey: Settings.Key.padMode)
+            AppSettings.defaults.set(showing ? "never" : "always", forKey: AppSettings.Key.padMode)
             applyPadVisibility()
             pauseMenu.padVisible = !pad.isHidden
         case .quit:

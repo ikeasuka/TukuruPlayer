@@ -21,12 +21,12 @@ struct GameEntry: Identifiable, Hashable {
     var playable: Bool { engine == 2 || engine == 3 }
 
     var lastPlayed: Date? {
-        let t = Settings.defaults.double(forKey: "lastPlayed." + id)
+        let t = AppSettings.defaults.double(forKey: "lastPlayed." + id)
         return t > 0 ? Date(timeIntervalSince1970: t) : nil
     }
 
     func markPlayed() {
-        Settings.defaults.set(Date().timeIntervalSince1970, forKey: "lastPlayed." + id)
+        AppSettings.defaults.set(Date().timeIntervalSince1970, forKey: "lastPlayed." + id)
     }
 }
 
@@ -36,11 +36,11 @@ final class GameLibrary: ObservableObject {
     @Published var importing: String?
     @Published var lastError: String?
 
-    static var documents: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0] }
-    static var gamesDir: URL { documents.appendingPathComponent("Games", isDirectory: true) }
-    static var rtpDir: URL { documents.appendingPathComponent("RTP", isDirectory: true) }
-    static var soundFontDir: URL { documents.appendingPathComponent("SoundFont", isDirectory: true) }
-    static let rtpNames = [3: "RPGVXAce", 2: "RPGVX"]
+    nonisolated static var documents: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0] }
+    nonisolated static var gamesDir: URL { documents.appendingPathComponent("Games", isDirectory: true) }
+    nonisolated static var rtpDir: URL { documents.appendingPathComponent("RTP", isDirectory: true) }
+    nonisolated static var soundFontDir: URL { documents.appendingPathComponent("SoundFont", isDirectory: true) }
+    nonisolated static let rtpNames = [3: "RPGVXAce", 2: "RPGVX"]
 
     init() {
         let fm = FileManager.default
@@ -53,18 +53,18 @@ final class GameLibrary: ObservableObject {
         refresh()
     }
 
-    static func rtpRoots(for game: GameEntry) -> [URL] {
+    nonisolated static func rtpRoots(for game: GameEntry) -> [URL] {
         guard let n = rtpNames[game.engine] else { return [] }
         return [rtpDir.appendingPathComponent(n, isDirectory: true)]
     }
 
-    static func rtpInstalled(engine: Int) -> Bool {
+    nonisolated static func rtpInstalled(engine: Int) -> Bool {
         guard let n = rtpNames[engine] else { return false }
         let dir = rtpDir.appendingPathComponent(n).appendingPathComponent("Graphics")
         return (try? FileManager.default.contentsOfDirectory(atPath: dir.path).isEmpty == false) ?? false
     }
 
-    static var soundFontName: String? { MIDIChannel.soundBankURL?.lastPathComponent }
+    nonisolated static var soundFontName: String? { MIDIChannel.soundBankURL?.lastPathComponent }
 
     /// Is `dir` itself a game folder?
     nonisolated static func isGameRoot(_ dir: URL) -> Bool {
