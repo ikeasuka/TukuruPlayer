@@ -171,6 +171,18 @@ enum GameImporter {
         }
     }
 
+    /// Does the folder (or its subfolders) contain a Windows program (e.g. an installer)?
+    static func containsExecutable(_ dir: URL, depth: Int = 0) -> Bool {
+        for c in children(dir) {
+            if isDirectory(c) {
+                if depth < 4 && containsExecutable(c, depth: depth + 1) { return true }
+            } else if ["exe", "msi", "cab"].contains(c.pathExtension.lowercased()) {
+                return true
+            }
+        }
+        return false
+    }
+
     /// Find the RTP root (folder containing Graphics/).
     static func findRTPRoot(_ dir: URL, depth: Int = 0) -> URL? {
         if children(dir).contains(where: { $0.lastPathComponent.lowercased() == "graphics" && isDirectory($0) }) { return dir }

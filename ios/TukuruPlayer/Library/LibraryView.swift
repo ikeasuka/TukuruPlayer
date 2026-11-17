@@ -6,6 +6,7 @@ struct LibraryView: View {
     // A single fileImporter: SwiftUI only honours one importer per view hierarchy.
     @State private var showImporter = false
     @State private var importerTypes: [UTType] = [.folder, .zip]
+    @State private var crashLog: URL?
     @State private var showSettings = false
     @State private var pendingDelete: GameEntry?
 
@@ -80,6 +81,12 @@ struct LibraryView: View {
             }
         }
         .onOpenURL { url in library.importItem(at: url) }
+        .onAppear {
+            if crashLog == nil, let url = GameLog.previousAbnormalSession() { crashLog = url }
+        }
+        .sheet(isPresented: Binding(get: { crashLog != nil }, set: { if !$0 { crashLog = nil } })) {
+            if let url = crashLog { CrashReportView(logURL: url) { crashLog = nil } }
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             library.refresh()
         }

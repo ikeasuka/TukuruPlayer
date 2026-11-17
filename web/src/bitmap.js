@@ -18,11 +18,18 @@ export class Bmp {
       const cv = document.createElement("canvas");
       cv.width = this.w;
       cv.height = this.h;
+      const c = cv.getContext("2d");
+      if (!c) {
+        // canvas memory limit reached: keep the bitmap usable as an empty image
+        console.error(`canvas ${this.w}x${this.h} could not be created`);
+        cv.width = cv.height = 1;
+        return null;
+      }
       this.canvas = cv;
-      this.c = cv.getContext("2d");
-      this.c.imageSmoothingEnabled = false;
+      this.c = c;
+      c.imageSmoothingEnabled = false;
       if (this.image) {
-        this.c.drawImage(this.image, 0, 0);
+        try { c.drawImage(this.image, 0, 0); } catch (e) { console.error("copy image failed", e); }
         this.image = null;
       }
     }
@@ -32,7 +39,7 @@ export class Bmp {
   touch() { this.version++; }
   free() {
     if (this.canvas) { this.canvas.width = 0; this.canvas.height = 0; }
-    this.canvas = null; this.c = null; this.image = null;
+    this.canvas = null; this.c = null; this.image = null; this.pixels = null;
   }
 }
 
@@ -74,24 +81,57 @@ export class BitmapStore {
 
   create(w, h) { return this.add(new Bmp(w, h)); }
 
+  // Decode an image file into a plain 2D canvas ("master", never modified).
+  // ImageBitmap / <img> sources are not kept: on iOS they can become unusable later
+  // (drawImage throws and the web process may be killed), canvases are reliable.
   async decode(url) {
     const res = await fetch(url);
     if (!res.ok) throw new Error("not found");
     const blob = await res.blob();
+    let src = null;
+    let objectURL = null;
     try {
-      return await createImageBitmap(blob);
+      src = await createImageBitmap(blob);
     } catch (e) {
-      // Fallback via <img>
-      const u = URL.createObjectURL(blob);
-      try {
-        const img = new Image();
-        img.src = u;
-        await img.decode();
-        return img;
-      } finally {
-        URL.revokeObjectURL(u);
-      }
+      objectURL = URL.createObjectURL(blob);
+      const img = new Image();
+      img.src = objectURL;
+      await img.decode();
+      src = img;
     }
+    try {
+      const w = src.width, h = src.height;
+      const cv = document.createElement("canvas");
+      cv.width = Math.max(1, w);
+      cv.height = Math.max(1, h);
+      const c = cv.getContext("2d");
+      if (!c) throw new Error(`canvas ${w}x${h} unavailable`);
+      c.drawImage(src, 0, 0);
+      return cv;
+    } finally {
+      if (src && src.close) src.close();
+      if (objectURL) URL.revokeObjectURL(objectURL);
+    }
+  }
+
+  // Run a canvas operation; log (instead of aborting the game) when the browser rejects it.
+  guard(name, fn, info) {
+    try {
+      return fn();
+    } catch (e) {
+      this.errors = (this.errors || 0) + 1;
+      if (this.errors <= 20) {
+        this.host.log("error", `${name} failed: ${e && e.name}: ${e && e.message} ${info ? info() : ""}`);
+      }
+      return undefined;
+    }
+  }
+
+  describe(b) {
+    if (!b) return "null";
+    const s = b.source();
+    const kind = !s ? "none" : (s.tagName || s.constructor.name);
+    return `${kind} ${b.w}x${b.h} src=${s ? s.width + "x" + s.height : "-"}`;
   }
 
   async load(path) {
@@ -169,8 +209,12 @@ export class BitmapStore {
     [sx, sy, sw, sh, x, y] = clipSrc(s.w, s.h, sx, sy, sw, sh, x, y);
     if (sw <= 0 || sh <= 0 || opacity <= 0) return;
     const c = d.ctx();
-    c.globalAlpha = Math.min(1, opacity / 255);
-    c.drawImage(s.source(), sx, sy, sw, sh, x, y, sw, sh);
+    const src = s.source();
+    if (!c || !src) return;
+    this.guard("blt", () => {
+      c.globalAlpha = Math.min(1, opacity / 255);
+      c.drawImage(src, sx, sy, sw, sh, x, y, sw, sh);
+    }, () => `src=${this.describe(s)} dst=${this.describe(d)} rect=${sx},${sy},${sw},${sh}`);
     c.globalAlpha = 1;
     d.touch();
   }
@@ -186,8 +230,12 @@ export class BitmapStore {
     if (sy + sh > s.h) { const o = sy + sh - s.h; sh -= o; dh -= o * fy; }
     if (sw <= 0 || sh <= 0) return;
     const c = d.ctx();
-    c.globalAlpha = Math.min(1, opacity / 255);
-    c.drawImage(s.source(), sx, sy, sw, sh, dx, dy, dw, dh);
+    const src = s.source();
+    if (!c || !src) return;
+    this.guard("stretch_blt", () => {
+      c.globalAlpha = Math.min(1, opacity / 255);
+      c.drawImage(src, sx, sy, sw, sh, dx, dy, dw, dh);
+    }, () => `src=${this.describe(s)} dst=${this.describe(d)}`);
     c.globalAlpha = 1;
     d.touch();
   }
@@ -231,8 +279,25 @@ export class BitmapStore {
   getPixel(id, x, y) {
     const d = this.get(id);
     if (x < 0 || y < 0 || x >= d.w || y >= d.h) return "0,0,0,0";
-    const p = d.ctx().getImageData(x, y, 1, 1).data;
-    return `${p[0]},${p[1]},${p[2]},${p[3]}`;
+    // Window_Base#text_color reads the windowskin for every color change: cache the pixels
+    // of small bitmaps instead of a GPU read-back per call.
+    if (d.w * d.h <= 512 * 512) {
+      if (!d.pixels || d.pixelsVersion !== d.version) {
+        const src = d.source();
+        const c = d.canvas ? d.c : (src && src.getContext ? src.getContext("2d") : d.ctx());
+        if (!c) return "0,0,0,0";
+        d.pixels = this.guard("get_pixel", () => c.getImageData(0, 0, d.w, d.h).data) || null;
+        d.pixelsVersion = d.version;
+        if (!d.pixels) return "0,0,0,0";
+      }
+      const i = (y * d.w + x) * 4;
+      const p = d.pixels;
+      return `${p[i]},${p[i + 1]},${p[i + 2]},${p[i + 3]}`;
+    }
+    const c = d.ctx();
+    if (!c) return "0,0,0,0";
+    const p = this.guard("get_pixel", () => c.getImageData(x, y, 1, 1).data);
+    return p ? `${p[0]},${p[1]},${p[2]},${p[3]}` : "0,0,0,0";
   }
 
   setPixel(id, x, y, r, g, b, a) {

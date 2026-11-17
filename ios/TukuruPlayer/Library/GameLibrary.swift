@@ -156,7 +156,14 @@ final class GameLibrary: ObservableObject {
                     src = staging
                 }
                 guard let root = GameImporter.findRTPRoot(src) else {
-                    throw NSError(domain: "RTP", code: 1, userInfo: [NSLocalizedDescriptionKey: "Graphics / Audio フォルダが見つかりません"])
+                    let installer = GameImporter.containsExecutable(src)
+                    let msg = installer
+                        ? "選ばれたのは RTP のインストーラー（Setup.exe）です。iPhone ではインストーラーを展開できないため、"
+                          + "パソコンで一度 RTP をインストールし、できたフォルダ（Windows では "
+                          + "C:\\Program Files (x86)\\Common Files\\Enterbrain\\RGSS3\\RPGVXAce、VX は RGSS2\\RPGVX）を "
+                          + "ZIP にして読み込んでください。"
+                        : "Graphics / Audio フォルダが見つかりません。RTP をインストールしたフォルダ（Graphics と Audio が入っているフォルダ）を選んでください。"
+                    throw NSError(domain: "RTP", code: 1, userInfo: [NSLocalizedDescriptionKey: msg])
                 }
                 let dest = Self.rtpDir.appendingPathComponent(name, isDirectory: true)
                 try? fm.removeItem(at: dest)

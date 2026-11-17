@@ -58,6 +58,15 @@ module TKRCore
       path
     end
 
+    def truncate_mode?(args, kw)
+      m = kw[:mode] || args[1]
+      case m
+      when String then m.start_with?('w')
+      when Integer then (m & File::TRUNC) != 0
+      else false
+      end
+    end
+
     def write_mode?(args, kw)
       m = kw[:mode] || args[1]
       case m
@@ -74,9 +83,9 @@ class File
     def initialize(*args, **kw)
       if args[0].is_a?(String) || args[0].respond_to?(:to_path)
         path = args[0].to_s
-        unless TKRCore.write_mode?(args, kw)
-          args[0] = TKRCore.materialize(path)
-        end
+        # Load the real contents first unless the file is being truncated ("w"/"w+"):
+        # appending to / updating an empty placeholder would destroy the original data.
+        args[0] = TKRCore.materialize(path) unless TKRCore.truncate_mode?(args, kw)
         @__tkr_write = TKRCore.write_mode?(args, kw)
       end
       super(*args, **kw)

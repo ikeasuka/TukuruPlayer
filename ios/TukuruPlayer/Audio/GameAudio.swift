@@ -110,7 +110,7 @@ final class GameAudio {
     }
 
     private func resumePlayers() {
-        for c in [bgm, bgs, me] where c.isActive && !(c === bgm && bgmPausedByME) { c.player.play() }
+        for c in [bgm, bgs, me] where c.isActive && !(c === bgm && bgmPausedByME) { c.resume() }
     }
 
     func setPaused(_ p: Bool) {
@@ -165,7 +165,56 @@ final class GameAudio {
         return Self.decode(data, name: item.name)
     }
 
+    /// Every buffer is converted to this format so the audio graph never has to be
+    /// reconnected while running (reconnecting / format mismatches raise exceptions that crash the app).
+    static let engineFormat = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
+
     static func decode(_ data: Data, name: String) -> Decoded? {
+        guard let d = decodeRaw(data, name: name) else { return nil }
+        guard case .pcm(let buf) = d.kind else { return d }
+        guard let (out, ratio) = normalize(buf) else {
+            NSLog("[TukuruPlayer] audio convert failed \(name) \(buf.format)")
+            return nil
+        }
+        func scale(_ v: Int) -> Int { v < 0 ? v : Int((Double(v) * ratio).rounded()) }
+        return Decoded(kind: .pcm(out), loopStart: scale(d.loopStart), loopLength: scale(d.loopLength))
+    }
+
+    /// Convert to 44.1kHz stereo float. Returns the buffer and the sample-rate ratio.
+    static func normalize(_ input: AVAudioPCMBuffer) -> (AVAudioPCMBuffer, Double)? {
+        let target = engineFormat
+        guard input.frameLength > 0, let src = input.floatChannelData else { return nil }
+        let frames = Int(input.frameLength)
+        let ch = Int(input.format.channelCount)
+        // 1) to stereo at the original rate (duplicate mono, drop extra channels)
+        guard let stereoFmt = AVAudioFormat(standardFormatWithSampleRate: input.format.sampleRate, channels: 2),
+              let stereo = AVAudioPCMBuffer(pcmFormat: stereoFmt, frameCapacity: AVAudioFrameCount(frames)),
+              let dst = stereo.floatChannelData else { return nil }
+        memcpy(dst[0], src[0], frames * MemoryLayout<Float>.size)
+        memcpy(dst[1], src[ch > 1 ? 1 : 0], frames * MemoryLayout<Float>.size)
+        stereo.frameLength = AVAudioFrameCount(frames)
+        if stereoFmt.sampleRate == target.sampleRate { return (stereo, 1) }
+        // 2) resample
+        guard let conv = AVAudioConverter(from: stereoFmt, to: target) else { return nil }
+        let ratio = target.sampleRate / stereoFmt.sampleRate
+        let cap = AVAudioFrameCount(Double(frames) * ratio + 4096)
+        guard let out = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: cap) else { return nil }
+        var supplied = false
+        var error: NSError?
+        let status = conv.convert(to: out, error: &error) { _, inputStatus in
+            if supplied {
+                inputStatus.pointee = .endOfStream
+                return nil
+            }
+            supplied = true
+            inputStatus.pointee = .haveData
+            return stereo
+        }
+        guard status != .error, out.frameLength > 0 else { return nil }
+        return (out, ratio)
+    }
+
+    private static func decodeRaw(_ data: Data, name: String) -> Decoded? {
         let head = data.prefix(4)
         if head == Data("OggS".utf8) {
             return decodeVorbis(data)
@@ -337,7 +386,8 @@ final class GameAudio {
         bgmPausedByME = false
         if bgm.isActive {
             bgm.player.volume = 0
-            bgm.player.play()
+            startEngine()
+            bgm.resume()
             bgm.fadeIn(ms: 1000)
         }
         if let m = midiBGM { if m.started { m.resume() } else { m.start() } }
@@ -403,8 +453,7 @@ final class AudioChannel {
         self.engine = engine
         engine.attach(player)
         engine.attach(speed)
-        let f = engine.mainMixerNode.outputFormat(forBus: 0)
-        let fmt = AVAudioFormat(standardFormatWithSampleRate: f.sampleRate > 0 ? f.sampleRate : 44100, channels: 2)
+        let fmt = GameAudio.engineFormat
         engine.connect(player, to: speed, format: fmt)
         engine.connect(speed, to: engine.mainMixerNode, format: fmt)
         format = fmt
@@ -437,13 +486,14 @@ final class AudioChannel {
 
     func play(_ buf: AVAudioPCMBuffer, volume v: Int, pitch: Int, pos: Int, loop: Bool,
               loopStart ls: Int, loopLength ll: Int, completion: (() -> Void)? = nil) {
-        guard let engine else { return }
+        guard engine != nil else { return }
         player.stop()
         cancelFade()
-        if format != buf.format {
-            engine.connect(player, to: speed, format: buf.format)
-            engine.connect(speed, to: engine.mainMixerNode, format: buf.format)
-            format = buf.format
+        // All buffers are normalized to GameAudio.engineFormat; never reconnect at runtime.
+        guard buf.format == format, buf.frameLength > 0 else {
+            NSLog("[TukuruPlayer] skipped buffer with unexpected format \(buf.format)")
+            completion?()
+            return
         }
         let total = Int(buf.frameLength)
         var start = max(0, pos)
@@ -480,7 +530,14 @@ final class AudioChannel {
         }
         setVolume(v, pitch: pitch)
         isActive = true
-        if engine.isRunning { player.play() }
+        resume()
+    }
+
+    /// Resume playback; AVAudioPlayerNode.play() raises an exception (app crash) when the
+    /// engine is not running, so always check first.
+    func resume() {
+        guard let engine, engine.isRunning, engine.attachedNodes.contains(player) else { return }
+        player.play()
     }
 
     func stop() {

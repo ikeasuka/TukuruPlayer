@@ -148,6 +148,11 @@ def run_unit_tests
   buf = "\0" * 256
   Win32API.new('kernel32', 'GetPrivateProfileString', 'pppplp', 'l').call('Game', 'Title', '', buf, 255, '.\\Game.ini')
   TestLog.check('ini read', buf.delete("\0") == 'テストゲーム')
+  # opening a not-yet-loaded file for update/append must not wipe its contents
+  File.open('Data/Flags.rvdata2', 'r+b') { |f| f.read(4) }
+  File.open('Data/TestMap.rvdata2', 'ab') { |f| }
+  TestLog.check('r+/a modes keep data', File.binread('Data/Flags.rvdata2').bytesize > 1000 &&
+                                          load_data('Data/TestMap.rvdata2').width == 40)
   # scripts that never dispose bitmaps must not exhaust memory
   peak = 0
   240.times do

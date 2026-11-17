@@ -73,7 +73,7 @@ jobs:
         run: |
           perl -e 'alarm 1500; exec @ARGV' xcodebuild -project TukuruPlayer.xcodeproj -scheme TukuruPlayer \
             -sdk iphoneos -destination 'generic/platform=iOS' -configuration Release \
-            -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build > release.log 2>&1 \
+            -derivedDataPath build CURRENT_PROJECT_VERSION=${{ github.run_number }} CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build > release.log 2>&1 \
             || { grep -E "error:" -A4 release.log | head -n 150; tail -n 20 release.log; exit 1; }
           mkdir -p Payload
           cp -R build/Build/Products/Release-iphoneos/TukuruPlayer.app Payload/

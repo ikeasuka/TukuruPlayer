@@ -43,6 +43,7 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         view.backgroundColor = .black
         // Let game controllers drive the game rather than UIKit focus navigation.
         controllerUserInteractionEnabled = false
+        log.stage("open game: \(game.title) (VX\(game.engine == 3 ? " Ace" : ""))")
 
         fs = GameFileSystem(root: game.url, rtpRoots: GameLibrary.rtpRoots(for: game))
         audio = GameAudio(fs: fs)
@@ -282,6 +283,7 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         guard !closed else { return }
         closed = true
         controllers.menuHandler = nil
+        log.endSession()
         audio.shutdown()
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "tkr")
         webView.stopLoading()
@@ -294,10 +296,14 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         guard let body = message.body as? [String: Any], let type = body["type"] as? String else { return }
         switch type {
         case "audio":
-            audio.handle(op: body["op"] as? String ?? "", args: body["args"] as? [Any] ?? [])
+            let op = body["op"] as? String ?? ""
+            let args = body["args"] as? [Any] ?? []
+            log.add("audio \(op) \(args.map { "\($0)" }.joined(separator: ","))")
+            audio.handle(op: op, args: args)
         case "save":
             if let path = body["path"] as? String, let b64 = body["data"] as? String,
                let data = Data(base64Encoded: b64) {
+                log.add("file write: \(path) (\(data.count) bytes)")
                 let fs = self.fs!
                 DispatchQueue.global(qos: .utility).async { fs.writeSave(path, data: data) }
             }
