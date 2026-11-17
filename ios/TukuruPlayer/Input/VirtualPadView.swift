@@ -64,10 +64,10 @@ final class VirtualPadView: UIView {
             let cy = (top + bottom) / 2 + 22 * s
             dc = CGPoint(x: max(inset.left + 16 + 66 * s, W * 0.27), y: cy)
             bc = CGPoint(x: min(W - inset.right - 16 - 79 * s, W * 0.73), y: cy)
-        } else if !gameRect.isEmpty && !portrait && min(leftMargin, rightMargin) >= 120 {
+        } else if !gameRect.isEmpty && !portrait && min(leftMargin, rightMargin) >= 90 {
             // Landscape: D-pad in the left margin, buttons in the right margin
             let m = min(leftMargin, rightMargin)
-            s = max(0.55, min(m / 175, H / 300, 1.35) * padScale)
+            s = max(0.5, min(m / 170, H / 300, 1.35) * padScale)
             let bottom = H - max(inset.bottom, 12)
             dc = CGPoint(x: inset.left + leftMargin / 2, y: bottom - 66 * s - 24 * s)
             bc = CGPoint(x: gameRect.maxX + rightMargin / 2, y: bottom - 70 * s - 20 * s)

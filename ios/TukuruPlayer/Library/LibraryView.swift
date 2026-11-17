@@ -24,7 +24,7 @@ struct LibraryView: View {
                                 if let i = idx.first { pendingDelete = library.games[i] }
                             }
                         } footer: {
-                            Text("ゲームコントローラー対応。ゲーム中は Options / Select ボタン、または右上の ≡ でメニューを開きます。")
+                            Text("ゲームコントローラー対応。ゲーム中は Options / Select ボタン、または画面の左上隅をタップして出る ≡ でメニューを開きます。")
                         }
                     }
                     .refreshable { library.refresh() }

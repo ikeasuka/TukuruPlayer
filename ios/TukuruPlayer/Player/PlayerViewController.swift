@@ -29,6 +29,7 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         self.game = game
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .fullScreen
+        modalPresentationCapturesStatusBarAppearance = true
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -78,7 +79,8 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
 
         menuButton.setImage(UIImage(systemName: "line.3.horizontal.circle"), for: .normal)
         menuButton.tintColor = UIColor(white: 1, alpha: 0.6)
-        menuButton.addTarget(self, action: #selector(showPauseMenu), for: .touchUpInside)
+        menuButton.addTarget(self, action: #selector(menuButtonTapped), for: .touchUpInside)
+        menuButton.alpha = 0.02
         menuButton.accessibilityLabel = "メニュー"
         view.addSubview(menuButton)
         menuButton.contentVerticalAlignment = .fill
@@ -128,26 +130,63 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         let safe = b.inset(by: view.safeAreaInsets)
         let aspect = gameSize.width / max(1, gameSize.height)
         let game: CGRect
+        let padShown = !pad.isHidden
         if b.height > b.width {
             let w = safe.width
             let h = min(safe.height, (w / aspect).rounded())
             game = CGRect(x: safe.minX, y: safe.minY, width: w, height: h)
         } else {
-            let h = safe.height
-            let w = min(safe.width, (h * aspect).rounded())
-            game = CGRect(x: (b.width - w) / 2, y: safe.minY, width: w, height: h)
+            // Landscape: keep black side margins wide enough for the D-pad and buttons.
+            let minMargin: CGFloat = padShown ? 130 : 0
+            var h = safe.height
+            var w = min(safe.width, (h * aspect).rounded())
+            if (safe.width - w) / 2 < minMargin {
+                w = max(safe.width * 0.5, safe.width - minMargin * 2)
+                h = (w / aspect).rounded()
+            }
+            game = CGRect(x: (b.width - w) / 2, y: safe.minY + (safe.height - h) / 2, width: w, height: h)
         }
         if webView.frame != game { webView.frame = game }
         pad.frame = b
         pad.gameRect = game
-        // menu button: outside of the game area when possible
-        let size: CGFloat = 40
-        if b.height > b.width {
-            menuButton.frame = CGRect(x: safe.maxX - size - 10, y: game.maxY + 8, width: size, height: size)
-        } else if b.width - game.maxX - view.safeAreaInsets.right >= size + 16 {
-            menuButton.frame = CGRect(x: safe.maxX - size - 10, y: safe.minY + 8, width: size, height: size)
+        // menu button: top-left corner (hidden until the corner is tapped)
+        let size: CGFloat = 60
+        menuButton.frame = CGRect(x: safe.minX + 2, y: safe.minY + 2, width: size, height: size)
+        menuButton.imageEdgeInsets = UIEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        setNeedsStatusBarAppearanceUpdate()
+        setNeedsUpdateOfHomeIndicatorAutoHidden()
+    }
+
+    // MARK: menu button (auto-hide)
+
+    private var menuRevealed = false
+    private var menuHideWork: DispatchWorkItem?
+
+    /// First tap near the corner reveals the button; a tap while visible opens the menu.
+    @objc private func menuButtonTapped() {
+        if menuRevealed {
+            setMenuRevealed(false)
+            showPauseMenu()
         } else {
-            menuButton.frame = CGRect(x: safe.maxX - size - 6, y: safe.minY + 6, width: size, height: size)
+            setMenuRevealed(true)
+        }
+    }
+
+    private func setMenuRevealed(_ on: Bool) {
+        menuRevealed = on
+        menuHideWork?.cancel()
+        UIView.animate(withDuration: 0.2) {
+            // alpha must stay above 0.01 so the hidden button still receives taps
+            self.menuButton.alpha = on ? 1.0 : 0.02
+        }
+        if on {
+            let work = DispatchWorkItem { [weak self] in self?.setMenuRevealed(false) }
+            menuHideWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: work)
         }
     }
 
@@ -181,6 +220,7 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         if pad.isHidden == show {
             pad.isHidden = !show
             if !show { pad.releaseAll() }
+            view.setNeedsLayout()
         }
     }
 
