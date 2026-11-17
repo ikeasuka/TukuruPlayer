@@ -27,7 +27,7 @@ final class VirtualPadView: UIView {
     private var dpadTouches = Set<UITouch>()
     private var dpadMask: UInt32 = 0
     private var touchKeys: [UITouch: Int] = [:]
-    private var mask: UInt32 = 0
+    private var padState: UInt32 = 0
     private let feedback = UIImpactFeedbackGenerator(style: .light)
 
     override init(frame: CGRect) {
@@ -147,9 +147,9 @@ final class VirtualPadView: UIView {
             m |= keys[i].button.bit
             if keys[i].button == .a { m |= RGSSButton.shift.bit }
         }
-        if m != mask {
-            let newly = m & ~mask
-            mask = m
+        if m != padState {
+            let newly = m & ~padState
+            padState = m
             if haptics && newly != 0 { feedback.impactOccurred(intensity: 0.6) }
             onMaskChange?(m)
             setNeedsDisplay()
@@ -186,7 +186,7 @@ final class VirtualPadView: UIView {
 
         // Buttons
         for k in keys {
-            let on = mask & k.button.bit != 0
+            let on = padState & k.button.bit != 0
             let path: UIBezierPath
             if k.pill {
                 let r = CGRect(x: k.center.x - k.radius * 1.6, y: k.center.y - k.radius * 0.8,

@@ -50,16 +50,17 @@ jobs:
         run: xcodegen generate
       - name: Build (simulator)
         run: |
-          set -o pipefail
           xcodebuild -project TukuruPlayer.xcodeproj -scheme TukuruPlayer \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-            -configuration Debug CODE_SIGNING_ALLOWED=NO build | tail -n 80
+            -configuration Debug CODE_SIGNING_ALLOWED=NO build > build.log 2>&1 \
+            || { grep -E "error:" -A4 build.log | head -n 150; tail -n 20 build.log; exit 1; }
+          grep -E "warning:" build.log | grep "ios/TukuruPlayer" | sort -u | head -n 60 || true
       - name: Build unsigned IPA (device)
         run: |
-          set -o pipefail
           xcodebuild -project TukuruPlayer.xcodeproj -scheme TukuruPlayer \
             -sdk iphoneos -destination 'generic/platform=iOS' -configuration Release \
-            -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tail -n 40
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build > release.log 2>&1 \
+            || { grep -E "error:" -A4 release.log | head -n 150; tail -n 20 release.log; exit 1; }
           mkdir -p Payload
           cp -R build/Build/Products/Release-iphoneos/TukuruPlayer.app Payload/
           zip -qr TukuruPlayer-unsigned.ipa Payload
