@@ -30,7 +30,7 @@ page.on("crash", () => logs.push("PAGEERROR page crashed"));
 await page.goto(`http://localhost:${port}/`);
 const t0 = Date.now();
 let ok = false;
-while (Date.now() - t0 < 60000) {
+while (Date.now() - t0 < 120000) {
   if (logs.some((l) => l.includes("TEST READY"))) { ok = true; break; }
   if (await page.locator("#overlay").isVisible()) break;
   await new Promise((r) => setTimeout(r, 250));
@@ -53,11 +53,13 @@ await new Promise((r) => setTimeout(r, 400));
 await page.screenshot({ path: shot + "-2.png" });
 await page.keyboard.up("KeyA");
 const fps = await page.evaluate(() => document.getElementById("fps").textContent);
-console.log(logs.filter((l) => l.startsWith("TEST") || l.startsWith("[stage]") || l.includes("ERROR") || l.includes("rror")).join("\n"));
+console.log(logs.filter((l) => l.startsWith("TEST") || l.startsWith("FLOW") || l.startsWith("[stage]") || l.includes("ERROR") || l.includes("rror")).join("\n"));
 if (await page.locator("#overlay").isVisible()) console.log("OVERLAY:", await page.locator("#overlay").innerText());
 console.log("fps:", fps);
 console.log(serverLog.join("").split("\n").filter((l) => l.includes("[save]")).slice(0, 5).join("\n"));
 await browser.close();
 server.kill();
-const failed = !ok || logs.some((l) => l.startsWith("TEST NG") || l.startsWith("PAGEERROR"));
+const flowStarted = logs.some((l) => l.startsWith("FLOW step"));
+const flowDone = logs.some((l) => l.startsWith("FLOW DONE"));
+const failed = !ok || (flowStarted && !flowDone) || logs.some((l) => l.startsWith("TEST NG") || l.startsWith("PAGEERROR"));
 process.exit(failed ? 1 : 0);

@@ -130,6 +130,13 @@ enum AppSettings {
         }
     }
 
+    /// e.g. "1.0.0 (build 16)"
+    static var versionString: String {
+        let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let b = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        return "\(v) (build \(b))"
+    }
+
     /// Settings passed to the web runtime.
     static var webSettings: [String: Any] {
         [

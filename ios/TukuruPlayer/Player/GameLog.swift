@@ -29,8 +29,7 @@ final class GameLog {
         Self.currentFile = fileURL
         Self.installExceptionHandler()
         add("session start: \(Date())")
-        let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
-        add("app build \(v), iOS \(ProcessInfo.processInfo.operatingSystemVersionString), memory \(ProcessInfo.processInfo.physicalMemory / 1_048_576)MB")
+        add("app \(AppSettings.versionString), iOS \(ProcessInfo.processInfo.operatingSystemVersionString), memory \(ProcessInfo.processInfo.physicalMemory / 1_048_576)MB")
     }
 
     /// Normal end of the session.

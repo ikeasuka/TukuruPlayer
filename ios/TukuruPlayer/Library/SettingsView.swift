@@ -95,7 +95,7 @@ struct SettingsView: View {
                 }
 
                 Section("情報") {
-                    LabeledContent("バージョン", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-")
+                    LabeledContent("バージョン", value: AppSettings.versionString)
                     Text("RGSS2 / RGSS3 互換ランタイム（ruby.wasm + WebGL）。RPGツクールは株式会社 KADOKAWA の登録商標です。本アプリは公式製品ではありません。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }

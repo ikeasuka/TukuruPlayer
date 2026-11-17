@@ -25,7 +25,7 @@ struct LibraryView: View {
                                 if let i = idx.first { pendingDelete = library.games[i] }
                             }
                         } footer: {
-                            Text("ゲームコントローラー対応。ゲーム中は Options / Select ボタン、または画面の左上隅をタップして出る ≡ でメニューを開きます。")
+                            Text("ゲームコントローラー対応。ゲーム中は Options / Select ボタン、または画面の左上隅をタップして出る ≡ でメニューを開きます。\nTukuruPlayer \(AppSettings.versionString)")
                         }
                     }
                     .refreshable { library.refresh() }
@@ -82,6 +82,15 @@ struct LibraryView: View {
         }
         .onOpenURL { url in library.importItem(at: url) }
         .onAppear {
+            // Automated testing (CI simulator): `-autoplay <game folder>` starts a game directly.
+            let args = ProcessInfo.processInfo.arguments
+            if let i = args.firstIndex(of: "-autoplay"), i + 1 < args.count {
+                library.refresh()
+                if let g = library.games.first(where: { $0.id == args[i + 1] }) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { launch(g) }
+                }
+                return
+            }
             if crashLog == nil, let url = GameLog.previousAbnormalSession() { crashLog = url }
         }
         .sheet(isPresented: Binding(get: { crashLog != nil }, set: { if !$0 { crashLog = nil } })) {

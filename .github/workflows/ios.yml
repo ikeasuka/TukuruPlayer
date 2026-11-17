@@ -65,10 +65,43 @@ jobs:
           perl -e 'alarm 1200; exec @ARGV' xcodebuild -project TukuruPlayer.xcodeproj -scheme TukuruPlayer \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
             -configuration Debug CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES ARCHS=arm64 \
+            -derivedDataPath build-sim CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             OTHER_SWIFT_FLAGS='$(inherited) -Xfrontend -warn-long-expression-type-checking=200 -Xfrontend -warn-long-function-bodies=500' \
             build > build.log 2>&1 \
             || { grep -E "error:|type-check" -A4 build.log | head -n 150; tail -n 30 build.log; exit 1; }
           grep -E "warning:" build.log | grep "ios/TukuruPlayer" | sort -u | head -n 60 || true
+      - name: Run the test game in the app on an iOS Simulator
+        run: |
+          set -x
+          pip3 install --break-system-packages pillow >/dev/null 2>&1 || pip3 install pillow >/dev/null 2>&1 || true
+          brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg >/dev/null 2>&1 || true
+          python3 web/dev/make_testgame.py
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print([x['udid'] for k,v in d.items() if 'iOS' in k for x in v if x['name'].startswith('iPhone')][-1])")
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          APP=$(find build-sim -name TukuruPlayer.app -path '*iphonesimulator*' | head -1)
+          xcrun simctl install "$UDID" "$APP"
+          xcrun simctl launch "$UDID" com.tukuruplayer.app; sleep 5; xcrun simctl terminate "$UDID" com.tukuruplayer.app || true
+          DATA=$(xcrun simctl get_app_container "$UDID" com.tukuruplayer.app data)
+          mkdir -p "$DATA/Documents/Games"
+          cp -R web/dev/testgame "$DATA/Documents/Games/testgame"
+          xcrun simctl launch "$UDID" com.tukuruplayer.app -autoplay testgame
+          LOG="$DATA/Documents/Logs/testgame.log"
+          for i in $(seq 1 60); do
+            sleep 3
+            if [ -f "$LOG" ] && grep -q "TEST READY\|terminated\|APP CRASH" "$LOG"; then break; fi
+          done
+          sleep 20   # keep running a bit longer (web process kills were seen ~12s after start)
+          mkdir -p sim-results
+          xcrun simctl io "$UDID" screenshot sim-results/screen.png || true
+          cp "$LOG" sim-results/ 2>/dev/null || true
+          echo "===== app log ====="; grep -v "\[stage\] script:" "$LOG" | tail -n 120 || true
+          grep -q "FLOW DONE" "$LOG" && ! grep -q "terminated\|APP CRASH\|TEST NG\|ERROR" "$LOG"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: simulator-results
+          path: sim-results
       - name: Build unsigned IPA (device)
         run: |
           perl -e 'alarm 1500; exec @ARGV' xcodebuild -project TukuruPlayer.xcodeproj -scheme TukuruPlayer \

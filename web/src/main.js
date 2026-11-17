@@ -101,7 +101,7 @@ window.addEventListener("unhandledrejection", (e) => Host.log("error", "Unhandle
 
 async function main() {
   const loading = $("loading");
-  Host.stage("page loaded");
+  Host.stage(`page loaded (runtime ${typeof __TKR_BUILD__ !== "undefined" ? __TKR_BUILD__ : "?"})`);
   const boot = await (await fetch(Host.gameURL("__boot.json"))).json();
   Host.stage(`boot info: engine=${boot.engine} files=${(boot.files || []).length} preload=${Object.keys(boot.preload || {}).length}`);
   const engine = boot.engine === 2 ? 2 : 3;

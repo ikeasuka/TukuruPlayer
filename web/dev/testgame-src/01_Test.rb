@@ -172,6 +172,8 @@ end
 rgss_main do
   Graphics.freeze
   run_unit_tests
+  Flow.run
+  Graphics.freeze
   vp = Viewport.new(0, 0, Graphics.width, Graphics.height)
   vp_top = Viewport.new
   vp_top.z = 200

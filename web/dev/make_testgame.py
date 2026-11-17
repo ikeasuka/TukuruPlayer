@@ -139,6 +139,50 @@ def transition(path):
     im.convert("RGBA").save(path)
 
 
+def face(path):
+    # 4x2 faces of 96x96
+    im = Image.new("RGBA", (384, 192), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    for i in range(8):
+        x = (i % 4) * 96
+        y = (i // 4) * 96
+        d.ellipse([x + 12, y + 8, x + 84, y + 88], fill=(250, 220, 190, 255), outline=(60, 40, 20, 255), width=3)
+        d.ellipse([x + 30, y + 36, x + 40, y + 46], fill=(30, 30, 30, 255))
+        d.ellipse([x + 56, y + 36, x + 66, y + 46], fill=(30, 30, 30, 255))
+        d.arc([x + 32, y + 50, x + 64, y + 72], 0, 180, fill=(160, 40, 40, 255), width=3)
+        d.rectangle([x + 12, y + 4, x + 84, y + 24], fill=[(60, 40, 20), (200, 160, 40), (20, 20, 20), (150, 60, 160)][i % 4] + (255,))
+    im.save(path)
+
+
+def write_wav(path, seconds, freq, rate=44100, channels=2):
+    import wave
+    n = int(seconds * rate)
+    frames = bytearray()
+    for i in range(n):
+        v = int(9000 * math.sin(2 * math.pi * freq * i / rate) * (1 - i / n if seconds < 1 else 1))
+        frames += struct.pack("<h", v) * channels
+    with wave.open(path, "wb") as w:
+        w.setnchannels(channels)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(bytes(frames))
+
+
+def audio(out):
+    # SE: short mono 22.05kHz WAV, BGS: WAV; BGM/ME: Ogg Vorbis when ffmpeg is available
+    write_wav(os.path.join(out, "Audio/SE/TestSE.wav"), 0.2, 880, rate=22050, channels=1)
+    write_wav(os.path.join(out, "Audio/BGS/TestBGS.wav"), 2.0, 220)
+    for name, sec, freq, ch, rate, meta in [("BGM/TestBGM", 6, 440, 2, 44100, ["-metadata", "LOOPSTART=44100", "-metadata", "LOOPLENGTH=176400"]),
+                                            ("ME/TestME", 1.5, 660, 1, 32000, [])]:
+        dst = os.path.join(out, "Audio", name + ".ogg")
+        try:
+            subprocess.check_call(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                                   f"sine=frequency={freq}:duration={sec}", "-ac", str(ch), "-ar", str(rate),
+                                   "-c:a", "libvorbis"] + meta + [dst])
+        except Exception:
+            write_wav(dst[:-4] + ".wav", sec, freq, rate=rate, channels=ch)
+
+
 def main():
     archive = "--archive" in sys.argv
     vx = "--vx" in sys.argv
@@ -146,7 +190,7 @@ def main():
     globals()["OUT"] = out
     mkdir(OUT)
     for sub in ["Graphics/System", "Graphics/Tilesets", "Graphics/Characters", "Graphics/Pictures",
-                "Graphics/Parallaxes", "Data", "Audio/BGM", "Audio/SE"]:
+                "Graphics/Parallaxes", "Graphics/Faces", "Data", "Audio/BGM", "Audio/BGS", "Audio/ME", "Audio/SE"]:
         mkdir(os.path.join(OUT, sub))
     windowskin(os.path.join(OUT, "Graphics/System/Window.png"))
     tile_a2(os.path.join(OUT, "Graphics/Tilesets/TestA2.png"))
@@ -155,6 +199,8 @@ def main():
     picture(os.path.join(OUT, "Graphics/Pictures/Orb.png"))
     parallax(os.path.join(OUT, "Graphics/Parallaxes/Stars.png"))
     transition(os.path.join(OUT, "Graphics/System/Fade.png"))
+    face(os.path.join(OUT, "Graphics/Faces/TestFace.png"))
+    audio(OUT)
     with open(os.path.join(OUT, "Game.ini"), "w", encoding="utf-8") as f:
         if vx:
             f.write("[Game]\r\nRTP=RPGVX\r\nLibrary=RGSS202J.dll\r\nScripts=Data\\Scripts.rvdata\r\nTitle=VXテスト\r\n")
