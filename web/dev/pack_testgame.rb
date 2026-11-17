@@ -40,7 +40,9 @@ end
 
 dir = ARGV[0]
 archive = ARGV[1] == '1'
-src_dir = File.join(__dir__, 'testgame-src')
+vx = ARGV[2] == 'vx'
+src_dir = File.join(__dir__, vx ? 'testgame-src-vx' : 'testgame-src')
+ext = vx ? 'rvdata' : 'rvdata2'
 
 # --- map ---------------------------------------------------------------------
 W = 40
@@ -68,18 +70,20 @@ map.data = data
 map.name = 'テストマップ'
 map.tint = Tone.new(-20, -10, 10, 30)
 FileUtils.mkdir_p(File.join(dir, 'Data'))
-File.binwrite(File.join(dir, 'Data', 'TestMap.rvdata2'), Marshal.dump(map))
-File.binwrite(File.join(dir, 'Data', 'Flags.rvdata2'), Marshal.dump(flags))
+# RGSS2 (Ruby 1.8) data has no string encodings: emulate with binary strings
+map.name = map.name.b if vx
+File.binwrite(File.join(dir, 'Data', "TestMap.#{ext}"), Marshal.dump(map))
+File.binwrite(File.join(dir, 'Data', "Flags.#{ext}"), Marshal.dump(flags))
 
 # --- scripts -------------------------------------------------------------------
 scripts = Dir[File.join(src_dir, '*.rb')].sort.each_with_index.map do |f, i|
   name = File.basename(f, '.rb').sub(/\A\d+_/, '')
-  [i + 1000, name.force_encoding('UTF-8'), Zlib::Deflate.deflate(File.read(f, encoding: 'UTF-8'))]
+  [i + 1000, vx ? name.b : name.force_encoding('UTF-8'), Zlib::Deflate.deflate(File.read(f, encoding: 'UTF-8'))]
 end
-File.binwrite(File.join(dir, 'Data', 'Scripts.rvdata2'), Marshal.dump(scripts))
+File.binwrite(File.join(dir, 'Data', "Scripts.#{ext}"), Marshal.dump(scripts))
 
 # --- archive -------------------------------------------------------------------
-arc_path = File.join(dir, 'Game.rgss3a')
+arc_path = File.join(dir, vx ? 'Game.rgss2a' : 'Game.rgss3a')
 File.delete(arc_path) if File.exist?(arc_path)
 if archive
   files = (Dir[File.join(dir, 'Data', '*')] + Dir[File.join(dir, 'Graphics', '**', '*')]).select { |f| File.file?(f) }.sort

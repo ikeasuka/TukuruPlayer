@@ -141,6 +141,9 @@ def transition(path):
 
 def main():
     archive = "--archive" in sys.argv
+    vx = "--vx" in sys.argv
+    out = OUT + "-vx" if vx else OUT
+    globals()["OUT"] = out
     mkdir(OUT)
     for sub in ["Graphics/System", "Graphics/Tilesets", "Graphics/Characters", "Graphics/Pictures",
                 "Graphics/Parallaxes", "Data", "Audio/BGM", "Audio/SE"]:
@@ -153,9 +156,12 @@ def main():
     parallax(os.path.join(OUT, "Graphics/Parallaxes/Stars.png"))
     transition(os.path.join(OUT, "Graphics/System/Fade.png"))
     with open(os.path.join(OUT, "Game.ini"), "w", encoding="utf-8") as f:
-        f.write("[Game]\r\nRTP=RPGVXAce\r\nLibrary=System\\RGSS301.dll\r\nScripts=Data\\Scripts.rvdata2\r\n"
-                "Title=テストゲーム\r\n")
-    subprocess.check_call(["ruby", os.path.join(HERE, "pack_testgame.rb"), OUT, "1" if archive else "0"])
+        if vx:
+            f.write("[Game]\r\nRTP=RPGVX\r\nLibrary=RGSS202J.dll\r\nScripts=Data\\Scripts.rvdata\r\nTitle=VXテスト\r\n")
+        else:
+            f.write("[Game]\r\nRTP=RPGVXAce\r\nLibrary=System\\RGSS301.dll\r\nScripts=Data\\Scripts.rvdata2\r\n"
+                    "Title=テストゲーム\r\n")
+    subprocess.check_call(["ruby", os.path.join(HERE, "pack_testgame.rb"), OUT, "1" if archive else "0", "vx" if vx else "ace"])
     print("test game written to", OUT)
 
 

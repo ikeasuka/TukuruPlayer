@@ -24,12 +24,14 @@ jobs:
         run: |
           pip install pillow
           python3 dev/make_testgame.py --archive
+          python3 dev/make_testgame.py --vx
       - name: Run test game in headless Chromium
         working-directory: web
         run: |
           npm i --no-save playwright@1.63.0
           npx playwright install --with-deps chromium
           node dev/e2e.mjs dev/testgame shot
+          node dev/e2e.mjs dev/testgame-vx shot-vx
       - uses: actions/upload-artifact@v4
         if: always()
         with:
