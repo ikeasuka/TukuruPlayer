@@ -3,3 +3,4 @@ dist/
 src/rgss_sources.gen.js
 dev/testgame/
 dev/testgame-vx/
+__pycache__/
