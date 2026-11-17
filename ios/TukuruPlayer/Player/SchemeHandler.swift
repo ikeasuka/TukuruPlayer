@@ -58,8 +58,9 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
                 }
             } else {
                 let rel = path == "/" ? "index.html" : String(path.dropFirst())
-                let fileURL = self.runtimeDir.appendingPathComponent(rel).standardizedFileURL
-                if fileURL.path.hasPrefix(self.runtimeDir.standardizedFileURL.path) {
+                let parts = GameImporter.safeComponents(rel)
+                let fileURL = GameImporter.safeJoin(self.runtimeDir, parts)
+                if !parts.isEmpty {
                     body = try? Data(contentsOf: fileURL, options: .mappedIfSafe)
                     mime = Self.mime(for: rel)
                 }

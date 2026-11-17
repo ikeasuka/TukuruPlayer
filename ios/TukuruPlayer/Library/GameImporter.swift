@@ -88,6 +88,21 @@ enum GameImporter {
         return msg
     }
 
+    /// Join path components below `base`, dropping "..", "." and empty parts.
+    static func safeJoin(_ base: URL, _ parts: [String]) -> URL {
+        var url = base
+        for p in parts where p != ".." && p != "." && !p.isEmpty && !p.contains("\0") {
+            url.appendPathComponent(p)
+        }
+        return url
+    }
+
+    /// Split a relative path ("a/b\\c") into safe components.
+    static func safeComponents(_ rel: String) -> [String] {
+        rel.replacingOccurrences(of: "\\", with: "/").split(separator: "/").map(String.init)
+            .filter { $0 != ".." && $0 != "." && !$0.isEmpty }
+    }
+
     /// Decode a ZIP entry name: UTF-8 when valid, otherwise Shift_JIS (CP932), otherwise ZIPFoundation's default.
     static func entryName(_ entry: Entry) -> String {
         let utf = entry.path(using: .utf8)
@@ -105,7 +120,6 @@ enum GameImporter {
     static func unzip(_ zip: URL, to dir: URL) throws {
         let archive = try Archive(url: zip, accessMode: .read)
         let fm = FileManager.default
-        let base = dir.standardizedFileURL.path
         var count = 0
         for entry in archive {
             var name = entryName(entry).replacingOccurrences(of: "\\", with: "/")
@@ -113,8 +127,9 @@ enum GameImporter {
             name = name.precomposedStringWithCanonicalMapping
             let comps = name.split(separator: "/").map(String.init).filter { $0 != ".." && $0 != "." && !$0.isEmpty }
             guard !comps.isEmpty else { continue }
-            let target = dir.appendingPathComponent(comps.joined(separator: "/")).standardizedFileURL
-            guard target.path.hasPrefix(base) else { continue }
+            // ".." and "." were removed above, so the target is always inside `dir`.
+            // (Do not compare standardized paths: on iOS /private/var vs /var differ.)
+            let target = safeJoin(dir, comps)
             if isDirEntry {
                 try fm.createDirectory(at: target, withIntermediateDirectories: true)
             } else if entry.type != .symlink {

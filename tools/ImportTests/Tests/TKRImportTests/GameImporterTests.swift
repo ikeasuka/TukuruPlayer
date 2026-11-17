@@ -71,6 +71,26 @@ final class GameImporterTests: XCTestCase {
             .appendingPathComponent("evil.txt").path))
     }
 
+    /// Regression: on iOS the temp folder is reported as /private/var/... while standardized
+    /// paths of existing folders become /var/..., which made every ZIP entry look "outside".
+    func testUnzipIntoPrivatePrefixedFolder() throws {
+        var dir = work.appendingPathComponent("priv")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let real = dir.resolvingSymlinksInPath().path
+        if !real.hasPrefix("/private/") && FileManager.default.fileExists(atPath: "/private" + real) {
+            dir = URL(fileURLWithPath: "/private" + real)
+        } else {
+            dir = URL(fileURLWithPath: real)
+        }
+        XCTAssertTrue(dir.path.hasPrefix("/private/"), dir.path)
+        try GameImporter.unzip(try fixture("rgss3a_nodirs"), to: dir)
+        XCTAssertNotNil(GameImporter.findGameRoot(dir), GameImporter.summary(of: dir))
+    }
+
+    func testSafeComponents() {
+        XCTAssertEqual(GameImporter.safeComponents("../a/./b\\..\\c"), ["a", "b", "c"])
+    }
+
     func testFolderImport() throws {
         let src = work.appendingPathComponent("src/外側/ゲーム")
         try FileManager.default.createDirectory(at: src.appendingPathComponent("Data"), withIntermediateDirectories: true)

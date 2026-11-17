@@ -28,7 +28,7 @@ final class GameFileSystem {
     private let lock = NSLock()
 
     init(root: URL, rtpRoots: [URL]) {
-        self.root = root.standardizedFileURL
+        self.root = root
         let fm = FileManager.default
         if let names = try? fm.contentsOfDirectory(atPath: root.path) {
             // Game.rgss3a normally, but RGSS uses <exe name>.rgss3a, so accept any name.
@@ -53,24 +53,27 @@ final class GameFileSystem {
             self.index[rel.lowercased()] = Item(name: rel, source: .disk(url))
         }
         for r in rtpRoots {
-            Self.walk(r.standardizedFileURL) { rel, url in
+            Self.walk(r) { rel, url in
                 let k = rel.lowercased()
                 if self.rtp[k] == nil { self.rtp[k] = Item(name: rel, source: .disk(url)) }
             }
         }
     }
 
+    /// Enumerate files below `dir`, passing the relative path ("Graphics/System/Window.png").
     static func walk(_ dir: URL, _ cb: (String, URL) -> Void) {
         let fm = FileManager.default
-        guard let en = fm.enumerator(at: dir, includingPropertiesForKeys: [.isDirectoryKey],
-                                     options: [.skipsHiddenFiles]) else { return }
-        let base = dir.path.hasSuffix("/") ? dir.path : dir.path + "/"
-        for case let url as URL in en {
-            let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-            if isDir { continue }
-            let p = url.standardizedFileURL.path
-            guard p.hasPrefix(base) else { continue }
-            cb(String(p.dropFirst(base.count)), url)
+        // enumerator(atPath:) yields relative paths, so no string prefix comparison is needed
+        // (iOS reports some paths as /private/var/... and others as /var/...).
+        guard let en = fm.enumerator(atPath: dir.path) else { return }
+        while let rel = en.nextObject() as? String {
+            let parts = rel.split(separator: "/")
+            if parts.contains(where: { $0.hasPrefix(".") }) { continue }
+            let url = dir.appendingPathComponent(rel)
+            var isDir: ObjCBool = false
+            if fm.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue {
+                cb(rel, url)
+            }
         }
     }
 
@@ -159,10 +162,9 @@ final class GameFileSystem {
     // MARK: saves
 
     private func safeURL(_ rel: String) -> URL? {
-        let clean = rel.replacingOccurrences(of: "\\", with: "/")
-        let url = root.appendingPathComponent(clean).standardizedFileURL
-        guard url.path.hasPrefix(root.path + "/") else { return nil }
-        return url
+        let parts = GameImporter.safeComponents(rel)
+        guard !parts.isEmpty else { return nil }
+        return GameImporter.safeJoin(root, parts)
     }
 
     func writeSave(_ rel: String, data: Data) {
