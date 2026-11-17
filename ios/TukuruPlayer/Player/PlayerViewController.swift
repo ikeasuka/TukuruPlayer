@@ -343,10 +343,27 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
 
     // MARK: WKNavigationDelegate / WKUIDelegate
 
+    /// WebKit (private delegate method) reports why the web process was terminated.
+    /// When implemented, WebKit calls this instead of webViewWebContentProcessDidTerminate.
+    @objc(_webView:webContentProcessDidTerminateWithReason:)
+    func webViewProcessDidTerminate(_ webView: WKWebView, reason: Int) {
+        let names = [0: "ExceededMemoryLimit（メモリ上限）", 1: "ExceededCPULimit（CPU使用量の上限）",
+                     2: "RequestedByClient", 3: "Crash（WebKit内部のクラッシュ）"]
+        log.add("!!! termination reason: \(reason) \(names[reason] ?? "")")
+        terminationReason = names[reason] ?? "コード \(reason)"
+        webViewWebContentProcessDidTerminate(webView)
+    }
+
+    private var terminationReason: String?
+    private var lastTerminationAlert = Date.distantPast
+
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        // avoid a second alert if WebKit reports the termination through both delegate methods
+        if Date().timeIntervalSince(lastTerminationAlert) < 1 { return }
+        lastTerminationAlert = Date()
         log.add("!!! web content process terminated")
         let alert = UIAlertController(title: "ゲームが終了しました",
-                                      message: "ゲームの実行が停止しました（メモリ不足など）。\n\n最後の処理: \(log.lastStage)\n\n"
+                                      message: "ゲームの実行が停止しました。\n理由: \(terminationReason ?? "不明")\n\n最後の処理: \(log.lastStage)\n\n"
                                         + log.tail(6),
                                       preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "再起動", style: .default) { [weak self] _ in

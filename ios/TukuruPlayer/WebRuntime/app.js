@@ -1364,8 +1364,14 @@ module TKRCore
 
     def marshal_load(data)
       if RGSS == 2
+        # Ruby 1.8 strings carry no encoding. Treat text as UTF-8, but keep binary data
+        # (e.g. encrypted payloads that games decrypt themselves) as bytes, otherwise
+        # String#size etc. would count characters and corrupt the data.
         Marshal.load(data, proc { |o|
-          o.force_encoding(Encoding::UTF_8) if o.is_a?(String) && o.encoding == Encoding::ASCII_8BIT && !o.frozen?
+          if o.is_a?(String) && o.encoding == Encoding::ASCII_8BIT && !o.frozen?
+            o.force_encoding(Encoding::UTF_8)
+            o.force_encoding(Encoding::ASCII_8BIT) unless o.valid_encoding?
+          end
           o
         })
       else

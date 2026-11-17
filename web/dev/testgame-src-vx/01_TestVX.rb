@@ -32,6 +32,8 @@ def vx_checks
   ok << ['Font.exist?', Font.exist?('UmePlus Gothic')]
   m = load_data('Data/TestMap.rvdata')
   ok << ['RGSS2 strings forced UTF-8', m.name.encoding == Encoding::UTF_8 && m.name == 'テストマップ']
+  blob = load_data('Data/Blob.rvdata')
+  ok << ['RGSS2 binary strings stay bytes', blob.bytesize == 40 && blob.size == 40]
   ok.each { |n, r| puts "TEST #{r ? 'OK' : 'NG'}: #{n}" }
 end
 

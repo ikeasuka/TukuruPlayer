@@ -75,6 +75,9 @@ map.name = map.name.b if vx
 File.binwrite(File.join(dir, 'Data', "TestMap.#{ext}"), Marshal.dump(map))
 File.binwrite(File.join(dir, 'Data', "Flags.#{ext}"), Marshal.dump(flags))
 
+# binary payload marshaled as a String (encrypted data in RGSS2 games)
+File.binwrite(File.join(dir, 'Data', "Blob.#{ext}"), Marshal.dump(("\xff\xfe\x00\x81" * 10).b))
+
 # custom "encrypted" data read with arbitrary Ruby APIs (like LPEX-style loaders)
 File.binwrite(File.join(dir, 'Data', 'Custom.bin'), Zlib::Deflate.deflate(Marshal.dump({ 'secret' => 42 })))
 
