@@ -1,0 +1,4 @@
+node_modules/
+dist/
+src/rgss_sources.gen.js
+dev/testgame/

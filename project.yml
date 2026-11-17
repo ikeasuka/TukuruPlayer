@@ -1,0 +1,61 @@
+name: TukuruPlayer
+options:
+  bundleIdPrefix: com.tukuruplayer
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+packages:
+  ZIPFoundation:
+    url: https://github.com/weichsel/ZIPFoundation.git
+    from: 0.9.19
+targets:
+  TukuruPlayer:
+    type: application
+    platform: iOS
+    sources:
+      - path: ios/TukuruPlayer
+        excludes:
+          - "WebRuntime"
+          - "WebRuntime/**"
+          - "Info.plist"
+          - "Audio/vorbis/stb_vorbis.c"
+      - path: ios/TukuruPlayer/Audio/vorbis/stb_vorbis.c
+        compilerFlags: "-w -O3"
+      - path: ios/TukuruPlayer/WebRuntime
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - package: ZIPFoundation
+    info:
+      path: ios/TukuruPlayer/Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tukuruplayer.app
+        PRODUCT_NAME: TukuruPlayer
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_OBJC_BRIDGING_HEADER: ios/TukuruPlayer/TukuruPlayer-Bridging-Header.h
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        GCC_OPTIMIZATION_LEVEL[config=Debug]: "1"
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        CODE_SIGN_STYLE: Automatic
+    preBuildScripts:
+      - name: Build web runtime
+        basedOnDependencyAnalysis: false
+        script: |
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          cd "$SRCROOT/web"
+          if command -v node >/dev/null 2>&1; then
+            [ -d node_modules ] || npm ci --no-audit --no-fund
+            node build.mjs
+          elif [ ! -f "$SRCROOT/ios/TukuruPlayer/WebRuntime/app.js" ]; then
+            echo "error: Node.js is required to build the web runtime (web/)."
+            exit 1
+          else
+            echo "warning: Node.js not found; using the prebuilt web runtime."
+          fi

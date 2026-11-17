@@ -1,0 +1,69 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  runtime-test:
+    name: Web runtime test (Chromium)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build runtime
+        working-directory: web
+        run: |
+          npm ci --no-audit --no-fund
+          node build.mjs
+      - name: Generate test game
+        working-directory: web
+        run: |
+          pip install pillow
+          python3 dev/make_testgame.py --archive
+      - name: Run test game in headless Chromium
+        working-directory: web
+        run: |
+          npm i --no-save playwright@1.63.0
+          npx playwright install --with-deps chromium
+          node dev/e2e.mjs dev/testgame shot
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: runtime-screenshots
+          path: web/shot-*.png
+
+  ios:
+    name: iOS app
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: xcodegen generate
+      - name: Build (simulator)
+        run: |
+          set -o pipefail
+          xcodebuild -project TukuruPlayer.xcodeproj -scheme TukuruPlayer \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug CODE_SIGNING_ALLOWED=NO build | tail -n 80
+      - name: Build unsigned IPA (device)
+        run: |
+          set -o pipefail
+          xcodebuild -project TukuruPlayer.xcodeproj -scheme TukuruPlayer \
+            -sdk iphoneos -destination 'generic/platform=iOS' -configuration Release \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tail -n 40
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/TukuruPlayer.app Payload/
+          zip -qr TukuruPlayer-unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TukuruPlayer-unsigned-ipa
+          path: TukuruPlayer-unsigned.ipa
