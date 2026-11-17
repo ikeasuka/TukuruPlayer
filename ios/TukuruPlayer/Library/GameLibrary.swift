@@ -242,9 +242,10 @@ final class GameLibrary: ObservableObject {
             } catch let e {
                 error = "RTP の読み込みに失敗しました: \(e.localizedDescription)"
             }
+            let message = error
             await MainActor.run {
                 self.importing = nil
-                if let error { self.lastError = error }
+                if let message { self.lastError = message }
                 self.objectWillChange.send()
             }
         }
