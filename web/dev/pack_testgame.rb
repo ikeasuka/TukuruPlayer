@@ -75,6 +75,9 @@ map.name = map.name.b if vx
 File.binwrite(File.join(dir, 'Data', "TestMap.#{ext}"), Marshal.dump(map))
 File.binwrite(File.join(dir, 'Data', "Flags.#{ext}"), Marshal.dump(flags))
 
+# custom "encrypted" data read with arbitrary Ruby APIs (like LPEX-style loaders)
+File.binwrite(File.join(dir, 'Data', 'Custom.bin'), Zlib::Deflate.deflate(Marshal.dump({ 'secret' => 42 })))
+
 # --- scripts -------------------------------------------------------------------
 scripts = Dir[File.join(src_dir, '*.rb')].sort.each_with_index.map do |f, i|
   name = File.basename(f, '.rb').sub(/\A\d+_/, '')

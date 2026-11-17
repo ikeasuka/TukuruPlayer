@@ -148,6 +148,10 @@ def run_unit_tests
   buf = "\0" * 256
   Win32API.new('kernel32', 'GetPrivateProfileString', 'pppplp', 'l').call('Game', 'Title', '', buf, 255, '.\\Game.ini')
   TestLog.check('ini read', buf.delete("\0") == 'テストゲーム')
+  # custom data loaders use IO.binread / File.size / Zlib on raw files
+  raw = IO.binread('Data/Custom.bin')
+  TestLog.check('custom data via IO.binread', File.size('Data/Custom.bin') == raw.bytesize &&
+                                               Marshal.load(Zlib::Inflate.inflate(raw))['secret'] == 42)
   # opening a not-yet-loaded file for update/append must not wipe its contents
   File.open('Data/Flags.rvdata2', 'r+b') { |f| f.read(4) }
   File.open('Data/TestMap.rvdata2', 'ab') { |f| }

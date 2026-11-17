@@ -27,6 +27,32 @@ module TKRBoot
       title = e.is_a?(SyntaxError) ? 'Script syntax error' : "#{e.class}"
       body = "#{e.message}\n\n#{bt.first(12).join("\n")}"
       TKRCore.call(:error, title, body)
+      ctx = source_context(bt)
+      TKRCore.call(:log, ctx) if ctx
+    rescue StandardError
+      nil
+    end
+
+    # The game script lines around the error (written to the log for diagnosis).
+    def source_context(bt)
+      return nil unless $RGSS_SCRIPTS
+      bt.each do |l|
+        next unless l =~ /\A(.+?):(\d+):in/
+        name = $1
+        line = $2.to_i
+        s = $RGSS_SCRIPTS.find { |sc| sc[1].to_s.dup.force_encoding('UTF-8').scrub('?') == name }
+        next unless s && s[3]
+        src = s[3].lines
+        from = [line - 6, 0].max
+        to = [line + 4, src.size - 1].min
+        out = (from..to).map do |i|
+          text = src[i].to_s.chomp
+          text = text[0, 400] + "…(#{text.size} chars)" if text.size > 400
+          format('%s%5d| %s', i + 1 == line ? '>' : ' ', i + 1, text)
+        end
+        return "source of #{name} around line #{line}:\n" + out.join("\n")
+      end
+      nil
     end
 
     def run

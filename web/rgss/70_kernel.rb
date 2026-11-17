@@ -158,8 +158,38 @@ class File
   end
 end
 
+# Other ways of reading a file / its size (IO.read, IO.binread, File.size, File.stat ...)
+# must also see the real contents rather than an empty placeholder.
+module TKRReadHook
+  %i[read binread readlines foreach].each do |m|
+    define_method(m) do |name, *args, **kw, &blk|
+      name = TKRCore.materialize(name) if name.is_a?(String) && !name.start_with?('|')
+      super(name, *args, **kw, &blk)
+    end
+  end
+end
+IO.singleton_class.prepend(TKRReadHook)
+
+module TKRStatHook
+  %i[size size? stat lstat zero? empty?].each do |m|
+    define_method(m) do |name, *args|
+      name = TKRCore.materialize(name) if name.is_a?(String)
+      super(name, *args)
+    end
+  end
+end
+File.singleton_class.prepend(TKRStatHook)
+
 module FileTest
   class << self
+    def size(name)
+      File.size(name)
+    end
+
+    def size?(name)
+      File.size?(name)
+    end
+
     def exist?(name)
       File.exist?(name)
     end

@@ -171,6 +171,39 @@ async function main() {
   const placeholders = new Set();
   for (const f of boot.files || []) { ciIndex.set(f.toLowerCase(), f); placeholders.add(f); }
   for (const f of Object.keys(boot.preload || {})) { ciIndex.set(f.toLowerCase(), f); placeholders.delete(f); }
+
+  // Replace a placeholder with the real file contents.
+  const loadPlaceholder = async (path) => {
+    if (!placeholders.has(path)) return true;
+    const res = await fetch(Host.gameURL(path));
+    if (!res.ok) return false;
+    const buf = new Uint8Array(await res.arrayBuffer());
+    const parts = path.split("/");
+    const name = parts.pop();
+    const parent = parts.length ? lookup(gameRoot, parts.join("/")) : null;
+    const dir = parent ? parent.contents : gameRoot;
+    dir.set(name, new File(buf));
+    placeholders.delete(path);
+    return true;
+  };
+
+  // Load every non-media file up front (Data/, custom data, text…). Games with their own
+  // data decryption read files with arbitrary Ruby APIs, which would otherwise see the
+  // empty placeholder ("marshal data too short").
+  const MEDIA = /\.(png|jpe?g|bmp|gif|ogg|wav|mp3|m4a|mid|midi|wma|aac|ogv|mp4|avi|wmv|mpg|ttf|otf|ttc|rgss3a|rgss2a|rgssad|exe|dll|lnk|ico)$/i;
+  const eager = [...placeholders].filter((f) => !MEDIA.test(f) && !/^(graphics|audio|movies|fonts|system)\//i.test(f));
+  if (eager.length) {
+    loading.textContent = `データを読み込み中… (${eager.length})`;
+    Host.stage(`preloading ${eager.length} data files`);
+    let next = 0;
+    const worker = async () => {
+      while (next < eager.length) {
+        const f = eager[next++];
+        try { await loadPlaceholder(f); } catch (e) { Host.log("error", `preload failed: ${f}: ${e}`); }
+      }
+    };
+    await Promise.all(Array.from({ length: 6 }, worker));
+  }
   const tmpRoot = new Map();
   const stdout = ConsoleStdout.lineBuffered((l) => Host.log("info", l));
   const stderr = ConsoleStdout.lineBuffered((l) => Host.log("error", l));
@@ -301,19 +334,7 @@ async function main() {
       return ciIndex.get(n.toLowerCase()) || "";
     },
     isPlaceholder: (path) => (placeholders.has(path) ? 1 : 0),
-    materialize: async (path) => {
-      if (!placeholders.has(path)) return true;
-      const res = await fetch(Host.gameURL(path));
-      if (!res.ok) return false;
-      const buf = new Uint8Array(await res.arrayBuffer());
-      const parts = path.split("/");
-      const name = parts.pop();
-      const parent = parts.length ? lookup(gameRoot, parts.join("/")) : null;
-      const dir = parent ? parent.contents : gameRoot;
-      dir.set(name, new File(buf));
-      placeholders.delete(path);
-      return true;
-    },
+    materialize: (path) => loadPlaceholder(path),
     // misc
     log: (s) => Host.log("info", s),
     msgbox: async (text) => {

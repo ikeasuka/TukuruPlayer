@@ -4,7 +4,8 @@ import WebKit
 
 /// Full-screen game player: WKWebView running the RGSS web runtime, native audio,
 /// game controller / keyboard input, on-screen virtual pad and a pause menu.
-final class PlayerViewController: GCEventViewController, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate {
+final class PlayerViewController: GCEventViewController, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate,
+    UIGestureRecognizerDelegate {
     let game: GameEntry
     var onClose: (() -> Void)?
 
@@ -69,6 +70,11 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         if #available(iOS 16.4, *) { webView.isInspectable = true }
         #endif
         view.addSubview(webView)
+        // touching the game screen reveals the menu button
+        let tap = UITapGestureRecognizer(target: self, action: #selector(gameTapped))
+        tap.cancelsTouchesInView = false
+        tap.delegate = self
+        webView.addGestureRecognizer(tap)
 
         pad.frame = view.bounds
         pad.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -81,7 +87,7 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         menuButton.setImage(UIImage(systemName: "line.3.horizontal.circle"), for: .normal)
         menuButton.tintColor = UIColor(white: 1, alpha: 0.6)
         menuButton.addTarget(self, action: #selector(menuButtonTapped), for: .touchUpInside)
-        menuButton.alpha = 0.02
+        menuButton.alpha = Self.menuIdleAlpha
         menuButton.accessibilityLabel = "メニュー"
         view.addSubview(menuButton)
         menuButton.contentVerticalAlignment = .fill
@@ -164,7 +170,13 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
 
     // MARK: menu button (auto-hide)
 
+    /// Faintly visible when idle; fully visible for a few seconds after touching the game.
+    private static let menuIdleAlpha: CGFloat = 0.35
     private var menuRevealed = false
+
+    @objc private func gameTapped() {
+        if !menuRevealed { setMenuRevealed(true) }
+    }
     private var menuHideWork: DispatchWorkItem?
 
     /// First tap near the corner reveals the button; a tap while visible opens the menu.
@@ -181,8 +193,7 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         menuRevealed = on
         menuHideWork?.cancel()
         UIView.animate(withDuration: 0.2) {
-            // alpha must stay above 0.01 so the hidden button still receives taps
-            self.menuButton.alpha = on ? 1.0 : 0.02
+            self.menuButton.alpha = on ? 1.0 : Self.menuIdleAlpha
         }
         if on {
             let work = DispatchWorkItem { [weak self] in self?.setMenuRevealed(false) }
@@ -289,6 +300,9 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         webView.stopLoading()
         dismiss(animated: true) { [onClose] in onClose?() }
     }
+
+    func gestureRecognizer(_ g: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
 
     // MARK: WKScriptMessageHandler
 
