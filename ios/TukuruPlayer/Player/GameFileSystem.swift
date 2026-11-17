@@ -31,12 +31,18 @@ final class GameFileSystem {
         self.root = root.standardizedFileURL
         let fm = FileManager.default
         if let names = try? fm.contentsOfDirectory(atPath: root.path) {
-            for candidate in ["game.rgss3a", "game.rgss2a", "game.rgssad"] {
-                if let n = names.first(where: { $0.lowercased() == candidate }),
-                   let a = try? RGSSArchive(url: root.appendingPathComponent(n)) {
-                    archive = a
-                    archiveKind = candidate
-                    break
+            // Game.rgss3a normally, but RGSS uses <exe name>.rgss3a, so accept any name.
+            let sorted = names.sorted { a, b in
+                let ga = a.lowercased().hasPrefix("game."), gb = b.lowercased().hasPrefix("game.")
+                return ga != gb ? ga : a < b
+            }
+            outer: for ext in ["rgss3a", "rgss2a", "rgssad"] {
+                for n in sorted where (n as NSString).pathExtension.lowercased() == ext {
+                    if let a = try? RGSSArchive(url: root.appendingPathComponent(n)) {
+                        archive = a
+                        archiveKind = ext
+                        break outer
+                    }
                 }
             }
         }
@@ -71,9 +77,9 @@ final class GameFileSystem {
     /// 3 = VX Ace (RGSS3), 2 = VX (RGSS2), 1 = XP (RGSS1, unsupported), 0 = unknown
     var engine: Int {
         func has(_ p: String) -> Bool { index[p.lowercased()] != nil }
-        if archiveKind == "game.rgss3a" || has("Data/Scripts.rvdata2") { return 3 }
-        if archiveKind == "game.rgss2a" || has("Data/Scripts.rvdata") { return 2 }
-        if archiveKind == "game.rgssad" || has("Data/Scripts.rxdata") { return 1 }
+        if archiveKind == "rgss3a" || has("Data/Scripts.rvdata2") { return 3 }
+        if archiveKind == "rgss2a" || has("Data/Scripts.rvdata") { return 2 }
+        if archiveKind == "rgssad" || has("Data/Scripts.rxdata") { return 1 }
         return 0
     }
 

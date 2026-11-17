@@ -17,8 +17,10 @@ struct SettingsView: View {
 
     @State private var mapping = AppSettings.mapping
     @State private var rtpTarget: Int?
-    @State private var showRTPImporter = false
-    @State private var showSoundFontImporter = false
+    // A single fileImporter: SwiftUI only honours one importer per view hierarchy.
+    private enum ImportKind { case rtp, soundFont }
+    @State private var importKind: ImportKind = .rtp
+    @State private var showImporter = false
     @State private var controllerNames: [String] = []
 
     var body: some View {
@@ -76,7 +78,7 @@ struct SettingsView: View {
                         Spacer()
                         Text(GameLibrary.soundFontName ?? "未設定").foregroundStyle(.secondary).lineLimit(1)
                     }
-                    Button("SoundFont（.sf2）を読み込む") { showSoundFontImporter = true }
+                    Button("SoundFont（.sf2）を読み込む") { importKind = .soundFont; showImporter = true }
                 } header: {
                     Text("サウンド")
                 } footer: {
@@ -103,11 +105,13 @@ struct SettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("完了") { dismiss() } }
             }
-            .fileImporter(isPresented: $showRTPImporter, allowedContentTypes: [.folder, .zip]) { r in
-                if case .success(let url) = r, let e = rtpTarget { library.importRTP(at: url, engine: e) }
-            }
-            .fileImporter(isPresented: $showSoundFontImporter, allowedContentTypes: [.data]) { r in
-                if case .success(let url) = r { library.importSoundFont(at: url) }
+            .fileImporter(isPresented: $showImporter,
+                          allowedContentTypes: importKind == .rtp ? [.folder, .zip] : [.data]) { r in
+                guard case .success(let url) = r else { return }
+                switch importKind {
+                case .rtp: if let e = rtpTarget { library.importRTP(at: url, engine: e) }
+                case .soundFont: library.importSoundFont(at: url)
+                }
             }
             .onAppear(perform: refreshControllers)
             .onReceive(NotificationCenter.default.publisher(for: .GCControllerDidConnect)) { _ in refreshControllers() }
@@ -125,7 +129,8 @@ struct SettingsView: View {
             Spacer()
             Button("読み込む") {
                 rtpTarget = engine
-                showRTPImporter = true
+                importKind = .rtp
+                showImporter = true
             }
             .buttonStyle(.bordered)
         }

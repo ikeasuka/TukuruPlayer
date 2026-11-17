@@ -3,8 +3,9 @@ import UniformTypeIdentifiers
 
 struct LibraryView: View {
     @EnvironmentObject private var library: GameLibrary
-    @State private var showFolderImporter = false
-    @State private var showZipImporter = false
+    // A single fileImporter: SwiftUI only honours one importer per view hierarchy.
+    @State private var showImporter = false
+    @State private var importerTypes: [UTType] = [.folder, .zip]
     @State private var showSettings = false
     @State private var pendingDelete: GameEntry?
 
@@ -37,17 +38,17 @@ struct LibraryView: View {
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
-                        Button { showFolderImporter = true } label: { Label("フォルダから追加", systemImage: "folder") }
-                        Button { showZipImporter = true } label: { Label("ZIP から追加", systemImage: "doc.zipper") }
+                        Button { openImporter([.folder]) } label: { Label("フォルダから追加", systemImage: "folder") }
+                        Button { openImporter([.zip]) } label: { Label("ZIP から追加", systemImage: "doc.zipper") }
                     } label: { Image(systemName: "plus") }
                     .accessibilityLabel("ゲームを追加")
                 }
             }
-            .fileImporter(isPresented: $showFolderImporter, allowedContentTypes: [.folder]) { r in
-                if case .success(let url) = r { library.importItem(at: url) }
-            }
-            .fileImporter(isPresented: $showZipImporter, allowedContentTypes: [.zip]) { r in
-                if case .success(let url) = r { library.importItem(at: url) }
+            .fileImporter(isPresented: $showImporter, allowedContentTypes: importerTypes) { r in
+                switch r {
+                case .success(let url): library.importItem(at: url)
+                case .failure(let e): library.lastError = "ファイルを開けませんでした: \(e.localizedDescription)"
+                }
             }
             .sheet(isPresented: $showSettings) { SettingsView().environmentObject(library) }
             .alert("ゲームを削除しますか？", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })) {
@@ -135,13 +136,19 @@ struct LibraryView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
             HStack {
-                Button { showFolderImporter = true } label: { Label("フォルダ", systemImage: "folder") }
+                Button { openImporter([.folder]) } label: { Label("フォルダ", systemImage: "folder") }
                     .buttonStyle(.borderedProminent)
-                Button { showZipImporter = true } label: { Label("ZIP", systemImage: "doc.zipper") }
+                Button { openImporter([.zip]) } label: { Label("ZIP", systemImage: "doc.zipper") }
                     .buttonStyle(.bordered)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func openImporter(_ types: [UTType]) {
+        importerTypes = types
+        // Let the Menu finish dismissing before presenting the document picker.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { showImporter = true }
     }
 
     private func launch(_ game: GameEntry) {

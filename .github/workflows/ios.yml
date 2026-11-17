@@ -47,6 +47,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Import logic tests (ZIP / folder detection)
+        working-directory: tools/ImportTests
+        run: swift test 2>&1 | tail -n 60
+        shell: bash -o pipefail {0}
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate Xcode project
