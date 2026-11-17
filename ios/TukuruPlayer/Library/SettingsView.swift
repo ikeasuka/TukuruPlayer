@@ -14,6 +14,7 @@ struct SettingsView: View {
     @AppStorage(AppSettings.Key.scaleMode) private var scaleMode = "fit"
     @AppStorage(AppSettings.Key.showFPS) private var showFPS = false
     @AppStorage(AppSettings.Key.ignoreSilent) private var ignoreSilent = false
+    @AppStorage(AppSettings.Key.gameFonts) private var gameFonts = true
 
     @State private var mapping = AppSettings.mapping
     @State private var rtpTarget: Int?
@@ -69,6 +70,7 @@ struct SettingsView: View {
                         Text("整数倍").tag("integer")
                     }
                     Toggle("FPS を表示", isOn: $showFPS)
+                    Toggle("ゲーム付属のフォントを使う", isOn: $gameFonts)
                 }
 
                 Section {

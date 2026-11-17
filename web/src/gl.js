@@ -181,6 +181,7 @@ export class Renderer {
         // same size: update in place instead of reallocating GPU memory every change
         gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, src);
       } else if (src) {
+        if (this.onCrumb) this.onCrumb(`tex:${bmp.w}x${bmp.h}`, `texture upload ${bmp.w}x${bmp.h} (${src.constructor.name})`);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
         bmp.texW = bmp.w;
         bmp.texH = bmp.h;

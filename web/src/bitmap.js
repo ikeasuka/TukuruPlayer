@@ -67,6 +67,15 @@ export class BitmapStore {
     this.measureCtx = document.createElement("canvas").getContext("2d");
   }
 
+  // Breadcrumbs: report the first occurrence of each kind of operation to the app log, so that
+  // if WebKit crashes the last reported step shows what was being drawn.
+  crumb(key, text) {
+    if (!this.crumbs) this.crumbs = new Set();
+    if (this.crumbs.has(key) || this.crumbs.size > 2000) return;
+    this.crumbs.add(key);
+    this.host.stage(text);
+  }
+
   get(id) {
     const b = this.map.get(id);
     if (!b) throw new Error("disposed bitmap");
@@ -79,7 +88,10 @@ export class BitmapStore {
     return id;
   }
 
-  create(w, h) { return this.add(new Bmp(w, h)); }
+  create(w, h) {
+    this.crumb(`create:${w}x${h}`, `Bitmap.new ${w}x${h}`);
+    return this.add(new Bmp(w, h));
+  }
 
   // Decode an image file into a plain 2D canvas ("master", never modified).
   // ImageBitmap / <img> sources are not kept: on iOS they can become unusable later
@@ -135,6 +147,7 @@ export class BitmapStore {
   }
 
   async load(path) {
+    this.crumb("load:" + path, `load ${path}`);
     const url = this.host.gameURL(path);
     let entry = this.imageCache.get(url);
     if (entry) {
@@ -153,6 +166,7 @@ export class BitmapStore {
       throw new Error("Unable to find file: " + path);
     }
     entry.bytes = img.width * img.height * 4;
+    this.crumb("loaded:" + path, `loaded ${path} ${img.width}x${img.height}`);
     this.trimImageCache();
     return this.add(new Bmp(img.width, img.height, img));
   }
@@ -211,6 +225,7 @@ export class BitmapStore {
     const c = d.ctx();
     const src = s.source();
     if (!c || !src) return;
+    this.crumb(`blt:${s.w}x${s.h}:${d.w}x${d.h}`, `blt ${s.w}x${s.h} -> ${d.w}x${d.h} (${sw}x${sh})`);
     this.guard("blt", () => {
       c.globalAlpha = Math.min(1, opacity / 255);
       c.drawImage(src, sx, sy, sw, sh, x, y, sw, sh);
@@ -232,6 +247,7 @@ export class BitmapStore {
     const c = d.ctx();
     const src = s.source();
     if (!c || !src) return;
+    this.crumb(`sblt:${s.w}x${s.h}:${d.w}x${d.h}`, `stretch_blt ${s.w}x${s.h} -> ${d.w}x${d.h}`);
     this.guard("stretch_blt", () => {
       c.globalAlpha = Math.min(1, opacity / 255);
       c.drawImage(src, sx, sy, sw, sh, dx, dy, dw, dh);
@@ -311,6 +327,7 @@ export class BitmapStore {
 
   hueChange(id, hue) {
     const d = this.get(id);
+    this.crumb("hue:" + d.w + "x" + d.h, `hue_change ${d.w}x${d.h}`);
     const c = d.ctx();
     const im = c.getImageData(0, 0, d.w, d.h);
     const p = im.data;
@@ -335,6 +352,7 @@ export class BitmapStore {
 
   blur(id) {
     const d = this.get(id);
+    this.crumb("blur:" + d.w + "x" + d.h, `blur ${d.w}x${d.h}`);
     const c = d.ctx();
     const w = d.w, h = d.h;
     const im = c.getImageData(0, 0, w, h);
@@ -410,6 +428,7 @@ export class BitmapStore {
     const d = this.get(id);
     const c = d.ctx();
     const f = this.parseFont(spec);
+    this.crumb("text:" + f.css, `draw_text font: ${f.css}`);
     c.font = f.css;
     const m = c.measureText(text);
     const tw = m.width;

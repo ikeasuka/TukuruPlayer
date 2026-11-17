@@ -99,6 +99,7 @@ enum AppSettings {
         static let scaleMode = "display.scale"     // "fit" | "integer"
         static let showFPS = "display.fps"         // Bool
         static let ignoreSilent = "audio.ignoreSilent" // Bool
+        static let gameFonts = "display.gameFonts"  // Bool: load fonts shipped in the game's Fonts folder
         static let mapping = "controller.mapping"  // JSON
     }
 
@@ -112,6 +113,7 @@ enum AppSettings {
             Key.scaleMode: "fit",
             Key.showFPS: false,
             Key.ignoreSilent: false,
+            Key.gameFonts: true,
         ])
     }
 
@@ -143,6 +145,7 @@ enum AppSettings {
             "smooth": defaults.bool(forKey: Key.smooth),
             "scale": defaults.string(forKey: Key.scaleMode) ?? "fit",
             "showFPS": defaults.bool(forKey: Key.showFPS),
+            "gameFonts": defaults.bool(forKey: Key.gameFonts),
         ]
     }
 }

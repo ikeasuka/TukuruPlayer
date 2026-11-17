@@ -112,6 +112,7 @@ async function main() {
   const renderer = new Renderer(canvas, 544, 416);
   const bitmaps = new BitmapStore(Host, renderer);
   const scene = new SceneDrawer(renderer, bitmaps);
+  renderer.onCrumb = (k, t) => bitmaps.crumb(k, t);
   const input = new Input();
   canvas.addEventListener("webglcontextlost", () => Host.log("error", "WebGL context lost (GPU process restarted?)"));
   canvas.addEventListener("webglcontextrestored", () => Host.log("error", "WebGL context restored"));
@@ -135,8 +136,13 @@ async function main() {
 
   // ---- fonts shipped with the game -------------------------------------------
   const fontFiles = (boot.files || []).filter((f) => /^fonts\/.+\.(ttf|otf|ttc)$/i.test(f));
-  Host.stage(`fonts: ${fontFiles.length}`);
-  await Promise.all(fontFiles.map((f) => bitmaps.loadFont(f)));
+  if (settings.gameFonts === false) {
+    Host.stage(`fonts: ${fontFiles.length} (skipped by setting)`);
+  } else {
+    Host.stage(`fonts: ${fontFiles.length} ${fontFiles.join(", ")}`);
+    await Promise.all(fontFiles.map((f) => bitmaps.loadFont(f)));
+    Host.stage(`font families: ${[...bitmaps.fontFamilies].join(", ") || "(none)"}`);
+  }
 
   // ---- frame pacing -------------------------------------------------------------
   let paused = false;
