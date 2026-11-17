@@ -247,10 +247,22 @@ module Kernel
 end
 
 # Windows API calls used by some scripts: return harmless defaults.
+# Raised for games that cannot run outside Windows (shown to the player as is).
+class TKRUnsupportedGame < StandardError; end
+
 class Win32API
+  # DLLs that games use to decrypt their own data/images. They are Windows programs and their
+  # protection is the game author's choice, so such games cannot be played here.
+  ENCRYPTION_DLLS = /\A(wfPcrypt|wfpcrypt)(\.dll)?\z/i
+
   def initialize(dll, func, *_args)
     @dll = dll.to_s
     @func = func.to_s
+    if @dll =~ ENCRYPTION_DLLS
+      raise TKRUnsupportedGame,
+            "このゲームは Windows 専用の暗号化 DLL（#{@dll}）でデータや画像を暗号化しているため、" \
+            "iPhone では遊べません。（Windows 版でお楽しみください）"
+    end
   end
 
   def call(*args)

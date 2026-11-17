@@ -119,6 +119,26 @@ end
 `,"10_core.rb":`# Core RGSS classes: Color, Tone, Rect, Table, Font, errors and the JS bridge.
 
 class RGSSError < StandardError; end
+
+# Accessors for built-in RGSS classes keep their state in @__name instance variables, so
+# that game scripts subclassing Sprite/Window/Plane... can freely use @x, @opacity, etc.
+# (in real RGSS these classes are implemented in C and have no Ruby-visible state).
+class Module
+  private
+
+  def tkr_reader(*names)
+    names.each { |n| class_eval("def #{n}; @__#{n}; end", __FILE__, __LINE__) }
+  end
+
+  def tkr_writer(*names)
+    names.each { |n| class_eval("def #{n}=(v); @__#{n} = v; end", __FILE__, __LINE__) }
+  end
+
+  def tkr_accessor(*names)
+    tkr_reader(*names)
+    tkr_writer(*names)
+  end
+end
 class RGSSReset < Exception; end
 
 module TKRCore
@@ -411,6 +431,16 @@ class Table
     @data
   end
 
+  # dup/clone: independent data, no shared JS upload id, no copied finalizer
+  # (the copied finalizer would free the original's tilemap data in JS).
+  def initialize_copy(o)
+    super
+    ObjectSpace.undefine_finalizer(self)
+    @data = o.__data.dup
+    @__js_id = nil
+    @__js_version = nil
+  end
+
   def _dump(_depth = 0)
     [@dim, @xsize, @ysize, @zsize, @data.size].pack('l5') + @data.pack('s*')
   end
@@ -511,8 +541,9 @@ end
 `,"20_bitmap.rb":`# Bitmap: pixel data lives in JS (canvas / ImageBitmap), referenced by id.
 
 class Bitmap
-  attr_reader :width, :height, :__id
-  attr_accessor :font
+  tkr_reader :width, :height
+  attr_reader :__id
+  tkr_accessor :font
 
   def initialize(*args)
     if args.size == 1
@@ -522,20 +553,20 @@ class Bitmap
       rescue JS::Error, StandardError => e
         raise Errno::ENOENT, path
       end
-      @width = TKRCore.int(:bmpW, @__id)
-      @height = TKRCore.int(:bmpH, @__id)
+      @__width = TKRCore.int(:bmpW, @__id)
+      @__height = TKRCore.int(:bmpH, @__id)
     elsif args.size == 2
       w = args[0].to_i
       h = args[1].to_i
       raise RGSSError, 'failed to create bitmap' if w <= 0 || h <= 0
-      @width = w
-      @height = h
+      @__width = w
+      @__height = h
       @__id = TKRCore.int(:bmpCreate, w, h)
     else
       raise ArgumentError, "wrong number of arguments (#{args.size} for 1..2)"
     end
-    @font = Font.new
-    @disposed = false
+    @__font = Font.new
+    @__disposed = false
     ObjectSpace.define_finalizer(self, Bitmap.__finalizer(@__id))
   end
 
@@ -548,10 +579,10 @@ class Bitmap
 
   def __init_wrap(id)
     @__id = id
-    @width = TKRCore.int(:bmpW, id)
-    @height = TKRCore.int(:bmpH, id)
-    @font = Font.new
-    @disposed = false
+    @__width = TKRCore.int(:bmpW, id)
+    @__height = TKRCore.int(:bmpH, id)
+    @__font = Font.new
+    @__disposed = false
     ObjectSpace.define_finalizer(self, Bitmap.__finalizer(id))
   end
 
@@ -561,28 +592,32 @@ class Bitmap
 
   def initialize_copy(o)
     super
+    # dup/clone also copies finalizers: drop the copied one, otherwise collecting the copy
+    # would dispose the ORIGINAL bitmap (e.g. Cache.system("Iconset").dup in battle scripts)
+    ObjectSpace.undefine_finalizer(self)
+    raise RGSSError, 'disposed bitmap' if o.disposed?
     @__id = TKRCore.int(:bmpDup, o.__id)
-    @font = o.font.dup
-    @disposed = false
+    @__font = o.font.dup
+    @__disposed = false
     ObjectSpace.define_finalizer(self, Bitmap.__finalizer(@__id))
   end
 
   def dispose
-    return if @disposed
+    return if @__disposed
     TKRCore.call(:bmpDispose, @__id)
-    @disposed = true
+    @__disposed = true
   end
 
   def disposed?
-    @disposed
+    @__disposed
   end
 
   def rect
-    Rect.new(0, 0, @width, @height)
+    Rect.new(0, 0, @__width, @__height)
   end
 
   def check_disposed
-    raise RGSSError, 'disposed bitmap' if @disposed
+    raise RGSSError, 'disposed bitmap' if @__disposed
   end
   private :check_disposed
 
@@ -691,15 +726,15 @@ class Bitmap
     s = str.to_s
     return self if s.empty?
     s = s.dup.force_encoding('UTF-8') unless s.encoding == Encoding::UTF_8
-    TKRCore.call(:bmpDrawText, @__id, x.to_i, y.to_i, w.to_i, h.to_i, s.scrub('?'), align.to_i, @font.__spec)
+    TKRCore.call(:bmpDrawText, @__id, x.to_i, y.to_i, w.to_i, h.to_i, s.scrub('?'), align.to_i, @__font.__spec)
     self
   end
 
   def text_size(str)
     s = str.to_s
     s = s.dup.force_encoding('UTF-8') unless s.encoding == Encoding::UTF_8
-    w = s.empty? ? 0 : TKRCore.int(:textSize, @font.__spec, s.scrub('?'))
-    Rect.new(0, 0, w, @font.size.to_i)
+    w = s.empty? ? 0 : TKRCore.int(:textSize, @__font.__spec, s.scrub('?'))
+    Rect.new(0, 0, w, @__font.size.to_i)
   end
 end
 `,"30_sprite.rb":`# Viewport, Sprite and Plane. State is kept in Ruby; Graphics.update serializes
@@ -728,289 +763,290 @@ end
 
 class Viewport
   include TKRFlash
-  attr_reader :rect, :color, :tone, :__uid
-  attr_accessor :visible, :z, :ox, :oy
+  tkr_reader :rect, :color, :tone
+  attr_reader :__uid
+  tkr_accessor :visible, :z, :ox, :oy
 
   def initialize(*args)
     if args.size == 0
-      @rect = Rect.new(0, 0, Graphics.width, Graphics.height)
+      @__rect = Rect.new(0, 0, Graphics.width, Graphics.height)
     elsif args.size == 1
-      @rect = Rect.new(args[0])
+      @__rect = Rect.new(args[0])
     else
-      @rect = Rect.new(*args)
+      @__rect = Rect.new(*args)
     end
-    @visible = true
-    @z = 0
-    @ox = 0
-    @oy = 0
-    @color = Color.new(0, 0, 0, 0)
-    @tone = Tone.new(0, 0, 0, 0)
-    @disposed = false
+    @__visible = true
+    @__z = 0
+    @__ox = 0
+    @__oy = 0
+    @__color = Color.new(0, 0, 0, 0)
+    @__tone = Tone.new(0, 0, 0, 0)
+    @__disposed = false
     @__uid = TKRCore.register_viewport(self)
   end
 
-  def rect=(r); @rect.set(r); end
-  def color=(c); @color.set(c); end
-  def tone=(t); @tone.set(t); end
+  def rect=(r); @__rect.set(r); end
+  def color=(c); @__color.set(c); end
+  def tone=(t); @__tone.set(t); end
 
   def dispose
-    return if @disposed
-    @disposed = true
+    return if @__disposed
+    @__disposed = true
     TKRCore.unregister_viewport(@__uid)
   end
 
-  def disposed?; @disposed; end
+  def disposed?; @__disposed; end
 
   def update
     __update_flash
   end
 
   def __pack(a)
-    return if @disposed
+    return if @__disposed
     f = __flash_state
     f = [0, 0, 0, 0] if f.nil? || f == :hide
-    r = @rect
-    c = @color
-    t = @tone
-    a.push(5, @__uid, @z.to_i, @visible ? 1 : 0, r.x, r.y, r.width, r.height, @ox.to_i, @oy.to_i,
+    r = @__rect
+    c = @__color
+    t = @__tone
+    a.push(5, @__uid, @__z.to_i, @__visible ? 1 : 0, r.x, r.y, r.width, r.height, @__ox.to_i, @__oy.to_i,
            c.red, c.green, c.blue, c.alpha, t.red, t.green, t.blue, t.gray, f[0], f[1], f[2], f[3])
   end
 end
 
 class Sprite
   include TKRFlash
-  attr_reader :viewport, :bitmap, :src_rect, :color, :tone, :__uid
-  attr_accessor :visible, :x, :y, :z, :ox, :oy, :zoom_x, :zoom_y, :angle, :mirror,
+  tkr_reader :viewport, :bitmap, :src_rect, :color, :tone
+  attr_reader :__uid
+  tkr_accessor :visible, :x, :y, :z, :ox, :oy, :zoom_x, :zoom_y, :angle, :mirror,
                 :bush_depth, :bush_opacity, :blend_type,
                 :wave_amp, :wave_length, :wave_speed, :wave_phase
-  attr_reader :opacity
-
+  tkr_reader :opacity
   def initialize(viewport = nil)
-    @viewport = viewport
-    @bitmap = nil
-    @src_rect = Rect.new(0, 0, 0, 0)
-    @visible = true
-    @x = @y = @z = @ox = @oy = 0
-    @zoom_x = @zoom_y = 1.0
-    @angle = 0
-    @mirror = false
-    @bush_depth = 0
-    @bush_opacity = 128
-    @opacity = 255
-    @blend_type = 0
-    @color = Color.new(0, 0, 0, 0)
-    @tone = Tone.new(0, 0, 0, 0)
-    @wave_amp = 0
-    @wave_length = 180
-    @wave_speed = 360
-    @wave_phase = 0.0
-    @disposed = false
+    @__viewport = viewport
+    @__bitmap = nil
+    @__src_rect = Rect.new(0, 0, 0, 0)
+    @__visible = true
+    @__x = @__y = @__z = @__ox = @__oy = 0
+    @__zoom_x = @__zoom_y = 1.0
+    @__angle = 0
+    @__mirror = false
+    @__bush_depth = 0
+    @__bush_opacity = 128
+    @__opacity = 255
+    @__blend_type = 0
+    @__color = Color.new(0, 0, 0, 0)
+    @__tone = Tone.new(0, 0, 0, 0)
+    @__wave_amp = 0
+    @__wave_length = 180
+    @__wave_speed = 360
+    @__wave_phase = 0.0
+    @__disposed = false
     @__uid = TKRCore.register(self)
   end
 
-  def viewport=(v); @viewport = v; end
+  def viewport=(v); @__viewport = v; end
 
   def bitmap=(b)
-    @bitmap = b
+    @__bitmap = b
     if b && !b.disposed?
-      @src_rect.set(0, 0, b.width, b.height)
+      @__src_rect.set(0, 0, b.width, b.height)
     end
   end
 
-  def src_rect=(r); @src_rect.set(r); end
-  def color=(c); @color.set(c); end
-  def tone=(t); @tone.set(t); end
+  def src_rect=(r); @__src_rect.set(r); end
+  def color=(c); @__color.set(c); end
+  def tone=(t); @__tone.set(t); end
 
   def opacity=(v)
     v = v.to_i
-    @opacity = v < 0 ? 0 : (v > 255 ? 255 : v)
+    @__opacity = v < 0 ? 0 : (v > 255 ? 255 : v)
   end
 
-  def width; @src_rect.width; end
-  def height; @src_rect.height; end
+  def width; @__src_rect.width; end
+  def height; @__src_rect.height; end
 
   def dispose
-    return if @disposed
-    @disposed = true
+    return if @__disposed
+    @__disposed = true
     TKRCore.unregister(@__uid)
   end
 
-  def disposed?; @disposed; end
+  def disposed?; @__disposed; end
 
   def update
     __update_flash
-    @wave_phase = (@wave_phase + @wave_speed / 180.0) % 360 if @wave_amp != 0
+    @__wave_phase = (@__wave_phase + @__wave_speed / 180.0) % 360 if @__wave_amp != 0
   end
 
   def __pack(a)
-    return if @disposed || !@visible
-    b = @bitmap
-    return if b.nil? || b.disposed? || @opacity <= 0
-    vp = @viewport
+    return if @__disposed || !@__visible
+    b = @__bitmap
+    return if b.nil? || b.disposed? || @__opacity <= 0
+    vp = @__viewport
     if vp
       return if vp.disposed? || !vp.visible
     end
     f = __flash_state
     return if f == :hide
-    c = f || [@color.red, @color.green, @color.blue, @color.alpha]
-    if f && @color.alpha > f[3]
-      c = [@color.red, @color.green, @color.blue, @color.alpha]
+    c = f || [@__color.red, @__color.green, @__color.blue, @__color.alpha]
+    if f && @__color.alpha > f[3]
+      c = [@__color.red, @__color.green, @__color.blue, @__color.alpha]
     end
-    r = @src_rect
-    t = @tone
-    a.push(1, @__uid, vp ? vp.__uid : 0, @z.to_i, b.__id, @x.to_i, @y.to_i, @ox.to_i, @oy.to_i,
-           @zoom_x, @zoom_y, @angle, @mirror ? 1 : 0, r.x, r.y, r.width, r.height, @opacity,
-           @blend_type.to_i, @bush_depth.to_i, @bush_opacity.to_i, c[0], c[1], c[2], c[3],
-           t.red, t.green, t.blue, t.gray, @wave_amp, @wave_length, @wave_phase)
+    r = @__src_rect
+    t = @__tone
+    a.push(1, @__uid, vp ? vp.__uid : 0, @__z.to_i, b.__id, @__x.to_i, @__y.to_i, @__ox.to_i, @__oy.to_i,
+           @__zoom_x, @__zoom_y, @__angle, @__mirror ? 1 : 0, r.x, r.y, r.width, r.height, @__opacity,
+           @__blend_type.to_i, @__bush_depth.to_i, @__bush_opacity.to_i, c[0], c[1], c[2], c[3],
+           t.red, t.green, t.blue, t.gray, @__wave_amp, @__wave_length, @__wave_phase)
   end
 end
 
 class Plane
-  attr_reader :viewport, :bitmap, :color, :tone, :__uid, :opacity
-  attr_accessor :visible, :z, :ox, :oy, :zoom_x, :zoom_y, :blend_type
+  tkr_reader :viewport, :bitmap, :color, :tone, :opacity
+  attr_reader :__uid
+  tkr_accessor :visible, :z, :ox, :oy, :zoom_x, :zoom_y, :blend_type
 
   def initialize(viewport = nil)
-    @viewport = viewport
-    @bitmap = nil
-    @visible = true
-    @z = 0
-    @ox = 0
-    @oy = 0
-    @zoom_x = 1.0
-    @zoom_y = 1.0
-    @opacity = 255
-    @blend_type = 0
-    @color = Color.new(0, 0, 0, 0)
-    @tone = Tone.new(0, 0, 0, 0)
-    @disposed = false
+    @__viewport = viewport
+    @__bitmap = nil
+    @__visible = true
+    @__z = 0
+    @__ox = 0
+    @__oy = 0
+    @__zoom_x = 1.0
+    @__zoom_y = 1.0
+    @__opacity = 255
+    @__blend_type = 0
+    @__color = Color.new(0, 0, 0, 0)
+    @__tone = Tone.new(0, 0, 0, 0)
+    @__disposed = false
     @__uid = TKRCore.register(self)
   end
 
-  def viewport=(v); @viewport = v; end
-  def bitmap=(b); @bitmap = b; end
-  def color=(c); @color.set(c); end
-  def tone=(t); @tone.set(t); end
+  def viewport=(v); @__viewport = v; end
+  def bitmap=(b); @__bitmap = b; end
+  def color=(c); @__color.set(c); end
+  def tone=(t); @__tone.set(t); end
 
   def opacity=(v)
     v = v.to_i
-    @opacity = v < 0 ? 0 : (v > 255 ? 255 : v)
+    @__opacity = v < 0 ? 0 : (v > 255 ? 255 : v)
   end
 
   def dispose
-    return if @disposed
-    @disposed = true
+    return if @__disposed
+    @__disposed = true
     TKRCore.unregister(@__uid)
   end
 
-  def disposed?; @disposed; end
+  def disposed?; @__disposed; end
 
   def update; end
 
   def __pack(a)
-    return if @disposed || !@visible
-    b = @bitmap
-    return if b.nil? || b.disposed? || @opacity <= 0
-    vp = @viewport
+    return if @__disposed || !@__visible
+    b = @__bitmap
+    return if b.nil? || b.disposed? || @__opacity <= 0
+    vp = @__viewport
     if vp
       return if vp.disposed? || !vp.visible
     end
-    c = @color
-    t = @tone
-    a.push(2, @__uid, vp ? vp.__uid : 0, @z.to_i, b.__id, @ox.to_i, @oy.to_i, @zoom_x, @zoom_y,
-           @opacity, @blend_type.to_i, c.red, c.green, c.blue, c.alpha, t.red, t.green, t.blue, t.gray)
+    c = @__color
+    t = @__tone
+    a.push(2, @__uid, vp ? vp.__uid : 0, @__z.to_i, b.__id, @__ox.to_i, @__oy.to_i, @__zoom_x, @__zoom_y,
+           @__opacity, @__blend_type.to_i, c.red, c.green, c.blue, c.alpha, t.red, t.green, t.blue, t.gray)
   end
 end
 `,"31_window.rb":`# Window (RGSS2 / RGSS3 compatible) and Tilemap (VX / VX Ace).
 
 class Window
-  attr_reader :viewport, :windowskin, :contents, :cursor_rect, :tone, :__uid
-  attr_reader :x, :y, :width, :height, :openness, :opacity, :back_opacity, :contents_opacity
-  attr_accessor :active, :visible, :arrows_visible, :pause, :z, :ox, :oy,
-                :padding, :padding_bottom
-
+  tkr_reader :viewport, :windowskin, :contents, :cursor_rect, :tone
+  attr_reader :__uid
+  tkr_reader :x, :y, :width, :height, :openness, :opacity, :back_opacity, :contents_opacity
+  tkr_accessor :active, :visible, :arrows_visible, :pause, :z, :ox, :oy, :padding, :padding_bottom
   def initialize(*args)
     if args.size >= 4
-      @x, @y, @width, @height = args[0, 4].map(&:to_i)
-      @viewport = nil
+      @__x, @__y, @__width, @__height = args[0, 4].map(&:to_i)
+      @__viewport = nil
     else
-      @viewport = args[0]
-      @x = @y = @width = @height = 0
+      @__viewport = args[0]
+      @__x = @__y = @__width = @__height = 0
     end
-    @windowskin = nil
-    @contents = TKRCore::RGSS == 3 ? Bitmap.new(1, 1) : nil
-    @cursor_rect = Rect.new(0, 0, 0, 0)
-    @active = true
-    @visible = true
-    @arrows_visible = true
-    @pause = false
-    @z = TKRCore::RGSS == 3 ? 100 : 0
-    @ox = @oy = 0
-    @padding = 12
-    @padding = 16 if TKRCore::RGSS == 2
-    @padding_bottom = @padding
-    @opacity = 255
-    @back_opacity = TKRCore::RGSS == 3 ? 192 : 200
-    @contents_opacity = 255
-    @openness = 255
-    @tone = Tone.new(0, 0, 0, 0)
-    @anim = 0
-    @disposed = false
+    @__windowskin = nil
+    @__contents = TKRCore::RGSS == 3 ? Bitmap.new(1, 1) : nil
+    @__cursor_rect = Rect.new(0, 0, 0, 0)
+    @__active = true
+    @__visible = true
+    @__arrows_visible = true
+    @__pause = false
+    @__z = TKRCore::RGSS == 3 ? 100 : 0
+    @__ox = @__oy = 0
+    @__padding = 12
+    @__padding = 16 if TKRCore::RGSS == 2
+    @__padding_bottom = @__padding
+    @__opacity = 255
+    @__back_opacity = TKRCore::RGSS == 3 ? 192 : 200
+    @__contents_opacity = 255
+    @__openness = 255
+    @__tone = Tone.new(0, 0, 0, 0)
+    @__anim = 0
+    @__disposed = false
     @__uid = TKRCore.register(self)
   end
 
-  def viewport=(v); @viewport = v; end
-  def windowskin=(b); @windowskin = b; end
-  def contents=(b); @contents = b; end
-  def cursor_rect=(r); @cursor_rect.set(r); end
-  def tone=(t); @tone.set(t); end
-  def x=(v); @x = v.to_i; end
-  def y=(v); @y = v.to_i; end
-  def width=(v); @width = v.to_i; end
-  def height=(v); @height = v.to_i; end
+  def viewport=(v); @__viewport = v; end
+  def windowskin=(b); @__windowskin = b; end
+  def contents=(b); @__contents = b; end
+  def cursor_rect=(r); @__cursor_rect.set(r); end
+  def tone=(t); @__tone.set(t); end
+  def x=(v); @__x = v.to_i; end
+  def y=(v); @__y = v.to_i; end
+  def width=(v); @__width = v.to_i; end
+  def height=(v); @__height = v.to_i; end
 
   def padding=(v)
-    @padding = v.to_i
-    @padding_bottom = @padding
+    @__padding = v.to_i
+    @__padding_bottom = @__padding
   end
 
-  def opacity=(v); @opacity = clamp255(v); end
-  def back_opacity=(v); @back_opacity = clamp255(v); end
-  def contents_opacity=(v); @contents_opacity = clamp255(v); end
-  def openness=(v); @openness = clamp255(v); end
+  def opacity=(v); @__opacity = clamp255(v); end
+  def back_opacity=(v); @__back_opacity = clamp255(v); end
+  def contents_opacity=(v); @__contents_opacity = clamp255(v); end
+  def openness=(v); @__openness = clamp255(v); end
 
   def move(x, y, w, h)
-    @x = x.to_i; @y = y.to_i; @width = w.to_i; @height = h.to_i
+    @__x = x.to_i; @__y = y.to_i; @__width = w.to_i; @__height = h.to_i
   end
 
-  def open?; @openness == 255; end
-  def close?; @openness == 0; end
+  def open?; @__openness == 255; end
+  def close?; @__openness == 0; end
 
   def update
-    @anim += 1
+    @__anim += 1
   end
 
   def dispose
-    return if @disposed
-    @disposed = true
+    return if @__disposed
+    @__disposed = true
     TKRCore.unregister(@__uid)
   end
 
-  def disposed?; @disposed; end
+  def disposed?; @__disposed; end
 
   def __pack(a)
-    return if @disposed || !@visible || @openness <= 0
-    vp = @viewport
+    return if @__disposed || !@__visible || @__openness <= 0
+    vp = @__viewport
     if vp
       return if vp.disposed? || !vp.visible
     end
-    skin = @windowskin && !@windowskin.disposed? ? @windowskin.__id : 0
-    cont = @contents && !@contents.disposed? ? @contents.__id : 0
-    c = @cursor_rect
-    t = @tone
-    a.push(3, @__uid, vp ? vp.__uid : 0, @z.to_i, skin, cont, @x, @y, @width, @height,
-           @ox.to_i, @oy.to_i, @padding, @padding_bottom, @opacity, @back_opacity, @contents_opacity,
-           @openness, c.x, c.y, c.width, c.height, @active ? 1 : 0, @pause ? 1 : 0,
-           @arrows_visible ? 1 : 0, t.red, t.green, t.blue, t.gray, @anim,
+    skin = @__windowskin && !@__windowskin.disposed? ? @__windowskin.__id : 0
+    cont = @__contents && !@__contents.disposed? ? @__contents.__id : 0
+    c = @__cursor_rect
+    t = @__tone
+    a.push(3, @__uid, vp ? vp.__uid : 0, @__z.to_i, skin, cont, @__x, @__y, @__width, @__height,
+           @__ox.to_i, @__oy.to_i, @__padding, @__padding_bottom, @__opacity, @__back_opacity, @__contents_opacity,
+           @__openness, c.x, c.y, c.width, c.height, @__active ? 1 : 0, @__pause ? 1 : 0,
+           @__arrows_visible ? 1 : 0, t.red, t.green, t.blue, t.gray, @__anim,
            TKRCore::RGSS == 3 ? 1 : 0)
   end
 
@@ -1024,28 +1060,28 @@ end
 
 class Tilemap
   class BitmapArray
-    def initialize; @a = Array.new(9); end
-    def [](i); @a[i]; end
-    def []=(i, b); @a[i] = b; end
+    def initialize; @__a = Array.new(9); end
+    def [](i); @__a[i]; end
+    def []=(i, b); @__a[i] = b; end
     def ids
-      @a.map { |b| b && !b.disposed? ? b.__id : 0 }
+      @__a.map { |b| b && !b.disposed? ? b.__id : 0 }
     end
   end
-
-  attr_reader :viewport, :bitmaps, :__uid
-  attr_accessor :map_data, :flash_data, :flags, :visible, :ox, :oy
+  tkr_reader :viewport, :bitmaps
+  attr_reader :__uid
+  tkr_accessor :map_data, :flash_data, :flags, :visible, :ox, :oy
 
   def initialize(viewport = nil)
-    @viewport = viewport
-    @bitmaps = BitmapArray.new
-    @map_data = nil
-    @flash_data = nil
-    @flags = nil
-    @visible = true
-    @ox = 0
-    @oy = 0
-    @anim = 0
-    @disposed = false
+    @__viewport = viewport
+    @__bitmaps = BitmapArray.new
+    @__map_data = nil
+    @__flash_data = nil
+    @__flags = nil
+    @__visible = true
+    @__ox = 0
+    @__oy = 0
+    @__anim = 0
+    @__disposed = false
     @__uid = TKRCore.register(self)
   end
 
@@ -1053,30 +1089,30 @@ class Tilemap
   alias passages flags
   alias passages= flags=
 
-  def viewport=(v); @viewport = v; end
+  def viewport=(v); @__viewport = v; end
 
   def update
-    @anim += 1
+    @__anim += 1
   end
 
   def dispose
-    return if @disposed
-    @disposed = true
+    return if @__disposed
+    @__disposed = true
     TKRCore.unregister(@__uid)
   end
 
-  def disposed?; @disposed; end
+  def disposed?; @__disposed; end
 
   def __pack(a)
-    return if @disposed || !@visible || @map_data.nil?
-    vp = @viewport
+    return if @__disposed || !@__visible || @__map_data.nil?
+    vp = @__viewport
     if vp
       return if vp.disposed? || !vp.visible
     end
-    map_id = @map_data.__sync_js
-    flags_id = @flags ? @flags.__sync_js : 0
-    a.push(4, @__uid, vp ? vp.__uid : 0, @ox.to_i, @oy.to_i, @anim)
-    a.concat(@bitmaps.ids)
+    map_id = @__map_data.__sync_js
+    flags_id = @__flags ? @__flags.__sync_js : 0
+    a.push(4, @__uid, vp ? vp.__uid : 0, @__ox.to_i, @__oy.to_i, @__anim)
+    a.concat(@__bitmaps.ids)
     a.push(map_id, flags_id)
   end
 end
@@ -1582,10 +1618,22 @@ module Kernel
 end
 
 # Windows API calls used by some scripts: return harmless defaults.
+# Raised for games that cannot run outside Windows (shown to the player as is).
+class TKRUnsupportedGame < StandardError; end
+
 class Win32API
+  # DLLs that games use to decrypt their own data/images. They are Windows programs and their
+  # protection is the game author's choice, so such games cannot be played here.
+  ENCRYPTION_DLLS = /\\A(wfPcrypt|wfpcrypt)(\\.dll)?\\z/i
+
   def initialize(dll, func, *_args)
     @dll = dll.to_s
     @func = func.to_s
+    if @dll =~ ENCRYPTION_DLLS
+      raise TKRUnsupportedGame,
+            "\u3053\u306E\u30B2\u30FC\u30E0\u306F Windows \u5C02\u7528\u306E\u6697\u53F7\u5316 DLL\uFF08#{@dll}\uFF09\u3067\u30C7\u30FC\u30BF\u3084\u753B\u50CF\u3092\u6697\u53F7\u5316\u3057\u3066\u3044\u308B\u305F\u3081\u3001" \\
+            "iPhone \u3067\u306F\u904A\u3079\u307E\u305B\u3093\u3002\uFF08Windows \u7248\u3067\u304A\u697D\u3057\u307F\u304F\u3060\u3055\u3044\uFF09"
+    end
   end
 
   def call(*args)
@@ -1640,6 +1688,10 @@ module TKRBoot
 
     def show_error(e)
       bt = (e.backtrace || []).reject { |l| l.include?('/rgss/') || l.include?('<internal:') }
+      if e.is_a?(TKRUnsupportedGame)
+        TKRCore.call(:error, '\u3053\u306E\u30B2\u30FC\u30E0\u306B\u306F\u5BFE\u5FDC\u3057\u3066\u3044\u307E\u305B\u3093', e.message)
+        return
+      end
       title = e.is_a?(SyntaxError) ? 'Script syntax error' : "#{e.class}"
       body = "#{e.message}\\n\\n#{bt.first(12).join("\\n")}"
       TKRCore.call(:error, title, body)
@@ -3144,5 +3196,5 @@ void main() {
     a = 1.0 - uProg;
   }
   outColor = vec4(mix(cur.rgb, fro.rgb, a), 1.0);
-}`;function Kn(c,e,n){let s=c.createShader(e);if(c.shaderSource(s,n),c.compileShader(s),!c.getShaderParameter(s,c.COMPILE_STATUS))throw new Error("Shader compile error: "+c.getShaderInfoLog(s));return s}function Tn(c,e,n){let s=c.createProgram();if(c.attachShader(s,Kn(c,c.VERTEX_SHADER,et)),c.attachShader(s,Kn(c,c.FRAGMENT_SHADER,e)),c.bindAttribLocation(s,0,"aPos"),c.bindAttribLocation(s,1,"aUV"),c.linkProgram(s),!c.getProgramParameter(s,c.LINK_STATUS))throw new Error("Program link error: "+c.getProgramInfoLog(s));let i={};for(let t of["uRes",...n])i[t]=c.getUniformLocation(s,t);return{p:s,u:i}}var on=class{constructor(e,n,s){this.canvas=e;let i=e.getContext("webgl2",{alpha:!1,antialias:!1,depth:!1,stencil:!1,premultipliedAlpha:!1,preserveDrawingBuffer:!1});if(!i)throw new Error("WebGL2 \u304C\u5229\u7528\u3067\u304D\u307E\u305B\u3093");this.gl=i,i.pixelStorei(i.UNPACK_PREMULTIPLY_ALPHA_WEBGL,!1),i.pixelStorei(i.UNPACK_COLORSPACE_CONVERSION_WEBGL,i.NONE),this.sprite=Tn(i,nt,["uTex","uOpacity","uColor","uTone","uBushV","uBushOpacity"]),this.flat=Tn(i,tt,["uFill"]),this.trans=Tn(i,st,["uCur","uFrozen","uMask","uProg","uVague","uUseMask"]),this.vao=i.createVertexArray(),i.bindVertexArray(this.vao),this.vbo=i.createBuffer(),i.bindBuffer(i.ARRAY_BUFFER,this.vbo),i.enableVertexAttribArray(0),i.enableVertexAttribArray(1),i.vertexAttribPointer(0,2,i.FLOAT,!1,16,0),i.vertexAttribPointer(1,2,i.FLOAT,!1,16,8),this.verts=new Float32Array(24*4096),this.nverts=0,this.brightness=255,this.frozen=!1,this.transition=null,this.resize(n,s)}makeTarget(e,n){let s=this.gl,i=s.createTexture();s.bindTexture(s.TEXTURE_2D,i),s.texImage2D(s.TEXTURE_2D,0,s.RGBA,e,n,0,s.RGBA,s.UNSIGNED_BYTE,null),s.texParameteri(s.TEXTURE_2D,s.TEXTURE_MIN_FILTER,s.NEAREST),s.texParameteri(s.TEXTURE_2D,s.TEXTURE_MAG_FILTER,s.NEAREST),s.texParameteri(s.TEXTURE_2D,s.TEXTURE_WRAP_S,s.CLAMP_TO_EDGE),s.texParameteri(s.TEXTURE_2D,s.TEXTURE_WRAP_T,s.CLAMP_TO_EDGE);let t=s.createFramebuffer();return s.bindFramebuffer(s.FRAMEBUFFER,t),s.framebufferTexture2D(s.FRAMEBUFFER,s.COLOR_ATTACHMENT0,s.TEXTURE_2D,i,0),s.bindFramebuffer(s.FRAMEBUFFER,null),{tex:i,fbo:t,w:e,h:n}}freeTarget(e){e&&(this.gl.deleteTexture(e.tex),this.gl.deleteFramebuffer(e.fbo))}resize(e,n){this.width=e,this.height=n,this.canvas.width=e,this.canvas.height=n;for(let s of["screen","temp","frozenT"])this.freeTarget(this[s]);this.screen=this.makeTarget(e,n),this.temp=this.makeTarget(e,n),this.frozenT=this.makeTarget(e,n)}texFor(e){let n=this.gl;if(e.tex||(e.tex=n.createTexture(),n.bindTexture(n.TEXTURE_2D,e.tex),n.texParameteri(n.TEXTURE_2D,n.TEXTURE_MIN_FILTER,n.NEAREST),n.texParameteri(n.TEXTURE_2D,n.TEXTURE_MAG_FILTER,n.NEAREST),n.texParameteri(n.TEXTURE_2D,n.TEXTURE_WRAP_S,n.CLAMP_TO_EDGE),n.texParameteri(n.TEXTURE_2D,n.TEXTURE_WRAP_T,n.CLAMP_TO_EDGE),e.texVersion=-1,e.texRepeat=!1),e.texVersion!==e.version){n.bindTexture(n.TEXTURE_2D,e.tex);let s=e.source();s&&e.texW===e.w&&e.texH===e.h?n.texSubImage2D(n.TEXTURE_2D,0,0,0,n.RGBA,n.UNSIGNED_BYTE,s):s?(n.texImage2D(n.TEXTURE_2D,0,n.RGBA,n.RGBA,n.UNSIGNED_BYTE,s),e.texW=e.w,e.texH=e.h):(n.texImage2D(n.TEXTURE_2D,0,n.RGBA,1,1,0,n.RGBA,n.UNSIGNED_BYTE,new Uint8Array(4)),e.texW=e.texH=1),e.texVersion=e.version}return e.tex}setRepeat(e,n){if(e.texRepeat===n)return;let s=this.gl;s.bindTexture(s.TEXTURE_2D,e.tex);let i=n?s.REPEAT:s.CLAMP_TO_EDGE;s.texParameteri(s.TEXTURE_2D,s.TEXTURE_WRAP_S,i),s.texParameteri(s.TEXTURE_2D,s.TEXTURE_WRAP_T,i),e.texRepeat=n}deleteTex(e){e.tex&&this.gl.deleteTexture(e.tex),e.tex=null}quad(e,n,s,i,t,r,a,o,l,d,_,u){this.nverts+6>this.verts.length/4&&this.grow();let f=this.verts,p=this.nverts*4;f[p++]=e,f[p++]=n,f[p++]=l,f[p++]=d,f[p++]=s,f[p++]=i,f[p++]=_,f[p++]=d,f[p++]=t,f[p++]=r,f[p++]=l,f[p++]=u,f[p++]=s,f[p++]=i,f[p++]=_,f[p++]=d,f[p++]=a,f[p++]=o,f[p++]=_,f[p++]=u,f[p++]=t,f[p++]=r,f[p++]=l,f[p++]=u,this.nverts+=6}rect(e,n,s,i,t,r,a,o){this.quad(e,n,e+s,n,e,n+i,e+s,n+i,t,r,a,o)}grow(){let e=new Float32Array(this.verts.length*2);e.set(this.verts),this.verts=e}flushWith(e){if(this.nverts===0)return;let n=this.gl;n.bindBuffer(n.ARRAY_BUFFER,this.vbo),n.bufferData(n.ARRAY_BUFFER,this.verts.subarray(0,this.nverts*4),n.STREAM_DRAW),n.drawArrays(n.TRIANGLES,0,this.nverts),this.nverts=0}setBlend(e){let n=this.gl;n.enable(n.BLEND),e===1?(n.blendEquation(n.FUNC_ADD),n.blendFuncSeparate(n.SRC_ALPHA,n.ONE,n.ZERO,n.ONE)):e===2?(n.blendEquationSeparate(n.FUNC_REVERSE_SUBTRACT,n.FUNC_ADD),n.blendFuncSeparate(n.SRC_ALPHA,n.ONE,n.ZERO,n.ONE)):(n.blendEquation(n.FUNC_ADD),n.blendFuncSeparate(n.SRC_ALPHA,n.ONE_MINUS_SRC_ALPHA,n.ONE,n.ONE_MINUS_SRC_ALPHA))}useSprite(e,n,s,i,t=2,r=1,a=0){let o=this.gl,l=this.sprite;o.useProgram(l.p),o.uniform2f(l.u.uRes,this.targetW,this.targetH),o.activeTexture(o.TEXTURE0),o.bindTexture(o.TEXTURE_2D,e),o.uniform1i(l.u.uTex,0),o.uniform1f(l.u.uOpacity,n),s?o.uniform4f(l.u.uColor,s[0]/255,s[1]/255,s[2]/255,s[3]/255):o.uniform4f(l.u.uColor,0,0,0,0),i?o.uniform4f(l.u.uTone,i[0]/255,i[1]/255,i[2]/255,i[3]/255):o.uniform4f(l.u.uTone,0,0,0,0),o.uniform1f(l.u.uBushV,t),o.uniform1f(l.u.uBushOpacity,r),this.setBlend(a)}flush(){this.flushWith()}fillRect(e,n,s,i,t,r,a,o,l=0){let d=this.gl;d.useProgram(this.flat.p),d.uniform2f(this.flat.u.uRes,this.targetW,this.targetH),d.uniform4f(this.flat.u.uFill,t,r,a,o),this.setBlend(l),this.rect(e,n,s,i,0,0,0,0),this.flushWith()}bindTarget(e){let n=this.gl;e?(n.bindFramebuffer(n.FRAMEBUFFER,e.fbo),n.viewport(0,0,e.w,e.h),this.targetW=e.w,this.targetH=e.h):(n.bindFramebuffer(n.FRAMEBUFFER,null),n.viewport(0,0,this.canvas.width,this.canvas.height),this.targetW=this.canvas.width,this.targetH=this.canvas.height)}scissor(e){let n=this.gl;if(!e){n.disable(n.SCISSOR_TEST);return}n.enable(n.SCISSOR_TEST);let s=Math.max(0,e[0]|0),i=Math.max(0,e[1]|0),t=Math.min(this.targetW,e[0]+e[2]|0),r=Math.min(this.targetH,e[1]+e[3]|0);n.scissor(s,this.targetH-Math.max(i,r),Math.max(0,t-s),Math.max(0,r-i))}applyEffect(e,n,s){let i=this.gl,t=this.width,r=this.height;i.bindTexture(i.TEXTURE_2D,this.temp.tex),i.copyTexSubImage2D(i.TEXTURE_2D,0,0,0,0,0,t,r);let a=Math.max(0,e[0]),o=Math.max(0,e[1]),l=Math.min(t,e[0]+e[2]),d=Math.min(r,e[1]+e[3]);l<=a||d<=o||(this.useSprite(this.temp.tex,1,n,s),i.disable(i.BLEND),this.rect(a,o,l-a,d-o,a/t,1-o/r,l/t,1-d/r),this.flushWith())}beginScene(){let e=this.gl;this.bindTarget(this.screen),e.disable(e.SCISSOR_TEST),e.clearColor(0,0,0,1),e.clear(e.COLOR_BUFFER_BIT)}composeTo(e){let n=this.gl;this.bindTarget(e),n.disable(n.SCISSOR_TEST);let s=this.targetW,i=this.targetH;this.useSprite(this.screen.tex,1,null,null),n.disable(n.BLEND),this.rect(0,0,s,i,0,1,1,0),this.flushWith(),this.brightness<255&&this.fillRect(0,0,s,i,0,0,0,1-this.brightness/255)}present(){let e=this.gl;if(this.frozen&&!this.transition){this.bindTarget(null),e.disable(e.SCISSOR_TEST),this.useSprite(this.frozenT.tex,1,null,null),e.disable(e.BLEND),this.rect(0,0,this.targetW,this.targetH,0,1,1,0),this.flushWith();return}if(this.transition){this.composeTo(this.temp),this.bindTarget(null);let n=this.trans;e.useProgram(n.p),e.uniform2f(n.u.uRes,this.targetW,this.targetH),e.activeTexture(e.TEXTURE0),e.bindTexture(e.TEXTURE_2D,this.temp.tex),e.uniform1i(n.u.uCur,0),e.activeTexture(e.TEXTURE1),e.bindTexture(e.TEXTURE_2D,this.frozenT.tex),e.uniform1i(n.u.uFrozen,1),e.activeTexture(e.TEXTURE2),e.bindTexture(e.TEXTURE_2D,this.transition.maskTex||this.temp.tex),e.uniform1i(n.u.uMask,2),e.uniform1f(n.u.uProg,this.transition.prog),e.uniform1f(n.u.uVague,this.transition.vague),e.uniform1i(n.u.uUseMask,this.transition.maskTex?1:0),e.disable(e.BLEND),this.rect(0,0,this.targetW,this.targetH,0,1,1,0),this.flushWith(),e.activeTexture(e.TEXTURE0);return}this.composeTo(null)}freeze(){this.composeTo(this.frozenT),this.frozen=!0}snapshotPixels(){let e=this.gl;this.composeTo(this.temp);let n=this.width,s=this.height,i=new Uint8Array(n*s*4);e.readPixels(0,0,n,s,e.RGBA,e.UNSIGNED_BYTE,i);let t=new Uint8ClampedArray(n*s*4),r=n*4;for(let a=0;a<s;a++)t.set(i.subarray((s-1-a)*r,(s-a)*r),a*r);return t}};var rt=['"Hiragino Sans"','"Hiragino Kaku Gothic ProN"','"Noto Sans JP"','"Noto Sans CJK JP"',"sans-serif"],ze=class{constructor(e,n,s=null){this.w=Math.max(1,e|0),this.h=Math.max(1,n|0),this.image=s,this.canvas=null,this.c=null,this.version=1,this.tex=null,this.texVersion=-1}ctx(){if(!this.c){let e=document.createElement("canvas");e.width=this.w,e.height=this.h;let n=e.getContext("2d");if(!n)return console.error(`canvas ${this.w}x${this.h} could not be created`),e.width=e.height=1,null;if(this.canvas=e,this.c=n,n.imageSmoothingEnabled=!1,this.image){try{n.drawImage(this.image,0,0)}catch(s){console.error("copy image failed",s)}this.image=null}}return this.c}source(){return this.canvas||this.image}touch(){this.version++}free(){this.canvas&&(this.canvas.width=0,this.canvas.height=0),this.canvas=null,this.c=null,this.image=null,this.pixels=null}};function it(c,e,n,s,i,t,r,a){return n<0&&(r-=n,i+=n,n=0),s<0&&(a-=s,t+=s,s=0),n+i>c&&(i=c-n),s+t>e&&(t=e-s),[n,s,i,t,r,a]}function De(c,e,n,s){return`rgba(${c|0},${e|0},${n|0},${(s/255).toFixed(4)})`}var ln=class{constructor(e,n){this.host=e,this.renderer=n,this.map=new Map,this.next=1,this.imageCache=new Map,this.fontFamilies=new Set,this.measureCtx=document.createElement("canvas").getContext("2d")}get(e){let n=this.map.get(e);if(!n)throw new Error("disposed bitmap");return n}add(e){let n=this.next++;return this.map.set(n,e),n}create(e,n){return this.add(new ze(e,n))}async decode(e){let n=await fetch(e);if(!n.ok)throw new Error("not found");let s=await n.blob(),i=null,t=null;try{i=await createImageBitmap(s)}catch{t=URL.createObjectURL(s);let a=new Image;a.src=t,await a.decode(),i=a}try{let r=i.width,a=i.height,o=document.createElement("canvas");o.width=Math.max(1,r),o.height=Math.max(1,a);let l=o.getContext("2d");if(!l)throw new Error(`canvas ${r}x${a} unavailable`);return l.drawImage(i,0,0),o}finally{i&&i.close&&i.close(),t&&URL.revokeObjectURL(t)}}guard(e,n,s){try{return n()}catch(i){this.errors=(this.errors||0)+1,this.errors<=20&&this.host.log("error",`${e} failed: ${i&&i.name}: ${i&&i.message} ${s?s():""}`);return}}describe(e){if(!e)return"null";let n=e.source();return`${n?n.tagName||n.constructor.name:"none"} ${e.w}x${e.h} src=${n?n.width+"x"+n.height:"-"}`}async load(e){let n=this.host.gameURL(e),s=this.imageCache.get(n);s?(this.imageCache.delete(n),this.imageCache.set(n,s)):(s={p:this.decode(n),bytes:0},this.imageCache.set(n,s));let i;try{i=await s.p}catch{throw this.imageCache.delete(n),new Error("Unable to find file: "+e)}return s.bytes=i.width*i.height*4,this.trimImageCache(),this.add(new ze(i.width,i.height,i))}trimImageCache(e=48*1048576){let n=0;for(let s of this.imageCache.values())n+=s.bytes;for(let[s,i]of this.imageCache){if(n<=e)break;i.bytes&&(n-=i.bytes,this.imageCache.delete(s))}}memoryMB(){let e=0;for(let n of this.map.values()){let s=n.w*n.h*4;e+=(n.canvas?s:0)+(n.tex?s:0)}return Math.round(e/1048576)}fromPixels(e,n,s){let i=new ze(e,n);return i.ctx().putImageData(new ImageData(s,e,n),0,0),this.add(i)}dup(e){let n=this.get(e),s=new ze(n.w,n.h);return n.canvas?s.ctx().drawImage(n.canvas,0,0):s.image=n.image,this.add(s)}dispose(e){let n=this.map.get(e);n&&(this.renderer.deleteTex(n),n.free(),this.map.delete(e))}width(e){return this.get(e).w}height(e){return this.get(e).h}blt(e,n,s,i,t,r,a,o,l){let d=this.get(e),_=this.get(i);if([t,r,a,o,n,s]=it(_.w,_.h,t,r,a,o,n,s),a<=0||o<=0||l<=0)return;let u=d.ctx(),f=_.source();!u||!f||(this.guard("blt",()=>{u.globalAlpha=Math.min(1,l/255),u.drawImage(f,t,r,a,o,n,s,a,o)},()=>`src=${this.describe(_)} dst=${this.describe(d)} rect=${t},${r},${a},${o}`),u.globalAlpha=1,d.touch())}stretchBlt(e,n,s,i,t,r,a,o,l,d,_){let u=this.get(e),f=this.get(r);if(l===0||d===0||i===0||t===0||_<=0)return;let p=i/l,m=t/d;if(a<0&&(n-=a*p,i+=a*p,l+=a,a=0),o<0&&(s-=o*m,t+=o*m,d+=o,o=0),a+l>f.w){let y=a+l-f.w;l-=y,i-=y*p}if(o+d>f.h){let y=o+d-f.h;d-=y,t-=y*m}if(l<=0||d<=0)return;let g=u.ctx(),w=f.source();!g||!w||(this.guard("stretch_blt",()=>{g.globalAlpha=Math.min(1,_/255),g.drawImage(w,a,o,l,d,n,s,i,t)},()=>`src=${this.describe(f)} dst=${this.describe(u)}`),g.globalAlpha=1,u.touch())}fill(e,n,s,i,t,r,a,o,l){let d=this.get(e),_=d.ctx();_.clearRect(n,s,i,t),l>0&&(_.fillStyle=De(r,a,o,l),_.fillRect(n,s,i,t)),d.touch()}gradient(e,n,s,i,t,r,a,o,l,d,_,u,f,p){let m=this.get(e),g=m.ctx();g.clearRect(n,s,i,t);let w=p?g.createLinearGradient(0,s,0,s+t):g.createLinearGradient(n,0,n+i,0);w.addColorStop(0,De(r,a,o,l)),w.addColorStop(1,De(d,_,u,f)),g.fillStyle=w,g.fillRect(n,s,i,t),m.touch()}clear(e){let n=this.get(e);!n.c&&!n.image||(n.ctx().clearRect(0,0,n.w,n.h),n.touch())}clearRect(e,n,s,i,t){let r=this.get(e);r.ctx().clearRect(n,s,i,t),r.touch()}getPixel(e,n,s){let i=this.get(e);if(n<0||s<0||n>=i.w||s>=i.h)return"0,0,0,0";if(i.w*i.h<=512*512){if(!i.pixels||i.pixelsVersion!==i.version){let l=i.source(),d=i.canvas?i.c:l&&l.getContext?l.getContext("2d"):i.ctx();if(!d||(i.pixels=this.guard("get_pixel",()=>d.getImageData(0,0,i.w,i.h).data)||null,i.pixelsVersion=i.version,!i.pixels))return"0,0,0,0"}let a=(s*i.w+n)*4,o=i.pixels;return`${o[a]},${o[a+1]},${o[a+2]},${o[a+3]}`}let t=i.ctx();if(!t)return"0,0,0,0";let r=this.guard("get_pixel",()=>t.getImageData(n,s,1,1).data);return r?`${r[0]},${r[1]},${r[2]},${r[3]}`:"0,0,0,0"}setPixel(e,n,s,i,t,r,a){let o=this.get(e);if(n<0||s<0||n>=o.w||s>=o.h)return;let l=new ImageData(1,1);l.data[0]=i,l.data[1]=t,l.data[2]=r,l.data[3]=a,o.ctx().putImageData(l,n,s),o.touch()}hueChange(e,n){let s=this.get(e),i=s.ctx(),t=i.getImageData(0,0,s.w,s.h),r=t.data,a=n*Math.PI/180,o=Math.cos(a),l=Math.sin(a),d=[.299+.701*o+.168*l,.587-.587*o+.33*l,.114-.114*o-.497*l,.299-.299*o-.328*l,.587+.413*o+.035*l,.114-.114*o+.292*l,.299-.3*o+1.25*l,.587-.588*o-1.05*l,.114+.886*o-.203*l];for(let _=0;_<r.length;_+=4){if(r[_+3]===0)continue;let u=r[_],f=r[_+1],p=r[_+2];r[_]=d[0]*u+d[1]*f+d[2]*p,r[_+1]=d[3]*u+d[4]*f+d[5]*p,r[_+2]=d[6]*u+d[7]*f+d[8]*p}i.putImageData(t,0,0),s.touch()}blur(e){let n=this.get(e),s=n.ctx(),i=n.w,t=n.h,a=s.getImageData(0,0,i,t).data,o=new Uint8ClampedArray(a.length);for(let l=0;l<t;l++)for(let d=0;d<i;d++){let _=0,u=0,f=0,p=0,m=0;for(let w=-1;w<=1;w++){let y=l+w;if(!(y<0||y>=t))for(let U=-1;U<=1;U++){let B=d+U;if(B<0||B>=i)continue;let F=(y*i+B)*4;_+=a[F],u+=a[F+1],f+=a[F+2],p+=a[F+3],m++}}let g=(l*i+d)*4;o[g]=_/m,o[g+1]=u/m,o[g+2]=f/m,o[g+3]=p/m}s.putImageData(new ImageData(o,i,t),0,0),n.touch()}radialBlur(e,n,s){let i=this.get(e),t=i.ctx();s=Math.max(2,Math.min(100,s|0));let r=document.createElement("canvas");r.width=i.w,r.height=i.h,r.getContext("2d").drawImage(i.canvas,0,0),t.clearRect(0,0,i.w,i.h);let a=i.w/2,o=i.h/2;for(let l=0;l<s;l++){let d=(l/(s-1)-.5)*n*Math.PI/180;t.save(),t.globalAlpha=1/(l+1),t.translate(a,o),t.rotate(d),t.drawImage(r,-a,-o),t.restore()}r.width=0,i.touch()}parseFont(e){let n=e.split(";"),i=(n[0]?n[0].split("|").filter(o=>o):[]).map(o=>'"'+o.replace(/"/g,"")+'"').concat(rt).join(","),t=Math.max(1,parseInt(n[1],10)||24),r=n[2]==="1";return{css:`${n[3]==="1"?"italic ":""}${r?"bold ":""}${t}px ${i}`,size:t,outline:n[4]==="1",shadow:n[5]==="1",color:n[6].split(",").map(Number),out:n[7].split(",").map(Number)}}textSize(e,n){let s=this.parseFont(e);return this.measureCtx.font=s.css,Math.ceil(this.measureCtx.measureText(n).width)}drawText(e,n,s,i,t,r,a,o){let l=this.get(e),d=l.ctx(),_=this.parseFont(o);d.font=_.css;let u=d.measureText(r),f=u.width;if(f<=0)return;let p=u.fontBoundingBoxAscent??_.size*.88,m=u.fontBoundingBoxDescent??_.size*.12,g=1;i>0&&f>i&&(g=Math.max(.4,i/f));let w=f*g,y=n;a===1?y=n+(i-w)/2:a===2&&(y=n+i-w);let U=Math.round(s+(t-(p+m))/2+p);d.save(),d.translate(y,U),g!==1&&d.scale(g,1),d.textBaseline="alphabetic",_.shadow&&(d.fillStyle=De(0,0,0,_.color[3]),d.fillText(r,1,1)),_.outline&&(d.strokeStyle=De(_.out[0],_.out[1],_.out[2],_.out[3]),d.lineWidth=2,d.lineJoin="round",d.strokeText(r,0,0)),d.fillStyle=De(_.color[0],_.color[1],_.color[2],_.color[3]),d.fillText(r,0,0),d.restore(),l.touch()}async loadFont(e){try{let n=await fetch(this.host.gameURL(e));if(!n.ok)return;let s=await n.arrayBuffer(),i=at(s);i.length===0&&i.push(e.split("/").pop().replace(/\.[^.]+$/,""));for(let t of i){if(this.fontFamilies.has(t))continue;let r=new FontFace(t,s);await r.load(),document.fonts.add(r),this.fontFamilies.add(t)}}catch(n){console.warn("font load failed",e,n)}}fontExists(e){if(this.fontFamilies.has(e))return!0;try{return document.fonts.check(`12px "${e}"`)}catch{return!1}}};function at(c){let e=new Set;try{let n=new DataView(c),s=0;n.getUint32(0)===1953784678&&(s=n.getUint32(12));let t=n.getUint16(s+4),r=-1;for(let l=0;l<t;l++){let d=s+12+l*16;n.getUint32(d)===1851878757&&(r=n.getUint32(d+8))}if(r<0)return[];let a=n.getUint16(r+2),o=r+n.getUint16(r+4);for(let l=0;l<a;l++){let d=r+6+l*12,_=n.getUint16(d),u=n.getUint16(d+2),f=n.getUint16(d+6),p=n.getUint16(d+8),m=n.getUint16(d+10);if(f!==1&&f!==4)continue;let g="";if(_===3||_===0)for(let w=0;w<p;w+=2)g+=String.fromCharCode(n.getUint16(o+m+w));else if(_===1&&u===0)for(let w=0;w<p;w++)g+=String.fromCharCode(n.getUint8(o+m+w));else continue;g&&f===1&&e.add(g)}}catch{}return[...e]}var Vn=[[[2,4],[1,4],[2,3],[1,3]],[[2,0],[1,4],[2,3],[1,3]],[[2,4],[3,0],[2,3],[1,3]],[[2,0],[3,0],[2,3],[1,3]],[[2,4],[1,4],[2,3],[3,1]],[[2,0],[1,4],[2,3],[3,1]],[[2,4],[3,0],[2,3],[3,1]],[[2,0],[3,0],[2,3],[3,1]],[[2,4],[1,4],[2,1],[1,3]],[[2,0],[1,4],[2,1],[1,3]],[[2,4],[3,0],[2,1],[1,3]],[[2,0],[3,0],[2,1],[1,3]],[[2,4],[1,4],[2,1],[3,1]],[[2,0],[1,4],[2,1],[3,1]],[[2,4],[3,0],[2,1],[3,1]],[[2,0],[3,0],[2,1],[3,1]],[[0,4],[1,4],[0,3],[1,3]],[[0,4],[3,0],[0,3],[1,3]],[[0,4],[1,4],[0,3],[3,1]],[[0,4],[3,0],[0,3],[3,1]],[[2,2],[1,2],[2,3],[1,3]],[[2,2],[1,2],[2,3],[3,1]],[[2,2],[1,2],[2,1],[1,3]],[[2,2],[1,2],[2,1],[3,1]],[[2,4],[3,4],[2,3],[3,3]],[[2,4],[3,4],[2,1],[3,3]],[[2,0],[3,4],[2,3],[3,3]],[[2,0],[3,4],[2,1],[3,3]],[[2,4],[1,4],[2,5],[1,5]],[[2,0],[1,4],[2,5],[1,5]],[[2,4],[3,0],[2,5],[1,5]],[[2,0],[3,0],[2,5],[1,5]],[[0,4],[3,4],[0,3],[3,3]],[[2,2],[1,2],[2,5],[1,5]],[[0,2],[1,2],[0,3],[1,3]],[[0,2],[1,2],[0,3],[3,1]],[[2,2],[3,2],[2,3],[3,3]],[[2,2],[3,2],[2,1],[3,3]],[[2,4],[3,4],[2,5],[3,5]],[[2,0],[3,4],[2,5],[3,5]],[[0,4],[1,4],[0,5],[1,5]],[[0,4],[3,0],[0,5],[1,5]],[[0,2],[3,2],[0,3],[3,3]],[[0,2],[1,2],[0,5],[1,5]],[[0,4],[3,4],[0,5],[3,5]],[[2,2],[3,2],[2,5],[3,5]],[[0,2],[3,2],[0,5],[3,5]],[[0,0],[1,0],[0,1],[1,1]]],Hn=[[[2,2],[1,2],[2,1],[1,1]],[[0,2],[1,2],[0,1],[1,1]],[[2,0],[1,0],[2,1],[1,1]],[[0,0],[1,0],[0,1],[1,1]],[[2,2],[3,2],[2,1],[3,1]],[[0,2],[3,2],[0,1],[3,1]],[[2,0],[3,0],[2,1],[3,1]],[[0,0],[3,0],[0,1],[3,1]],[[2,2],[1,2],[2,3],[1,3]],[[0,2],[1,2],[0,3],[1,3]],[[2,0],[1,0],[2,3],[1,3]],[[0,0],[1,0],[0,3],[1,3]],[[2,2],[3,2],[2,3],[3,3]],[[0,2],[3,2],[0,3],[3,3]],[[2,0],[3,0],[2,3],[3,3]],[[0,0],[3,0],[0,3],[3,3]]],ot=[[[2,0],[1,0],[2,1],[1,1]],[[0,0],[1,0],[0,1],[1,1]],[[2,0],[3,0],[2,1],[3,1]],[[0,0],[3,0],[0,1],[3,1]]],ie=32,M=16,dn=class{constructor(){this.passes=[]}static isAuto(e){return e>=2048}emit(e,n,s,i,t,r,a,o,l,d){let _=e.get(n);_||(_=[],e.set(n,_)),_.push(a,o,l,d,s,i,t,r)}drawTile(e,n,s,i,t,r){n<=0||n>=8192||(n>=2048?this.drawAutotile(e,n,s,i,t,r):this.drawNormal(e,n,s,i))}drawNormal(e,n,s,i){let t;if(n>=1536&&n<1664)t=4;else if(n<1024)t=5+Math.floor(n/256);else return;let r=(Math.floor(n/128)%2*8+n%8)*ie,a=Math.floor(n%256/8)%16*ie;this.emit(e,t,r,a,ie,ie,s,i,ie,ie)}drawAutotile(e,n,s,i,t,r){let a=Vn,o=Math.floor((n-2048)/48),l=(n-2048)%48,d=o%8,_=Math.floor(o/8),u=0,f=0,p=0,m=!1;if(n<2816){let w=[0,1,2,1][t%4];p=0,o===0?(u=w*2,f=0):o===1?(u=w*2,f=3):o===2?(u=6,f=0):o===3?(u=6,f=3):(u=Math.floor(d/4)*8,f=_*6+Math.floor(d/2)%2*3,o%2===0?u+=w*2:(u+=6,a=ot,f+=t%3))}else n<4352?(p=1,u=d*2,f=(_-2)*3,m=r?(r[n]&128)!==0:!1):n<5888?(p=2,u=d*2,f=(_-6)*2,a=Hn):(p=3,u=d*2,f=Math.floor((_-10)*2.5+(_%2===1?.5:0)),_%2===1&&(a=Hn));let g=a[l];if(g)for(let w=0;w<4;w++){let y=g[w][0],U=g[w][1],B=(u*2+y)*M,F=(f*2+U)*M,z=s+w%2*M,j=i+Math.floor(w/2)*M;if(m&&(U===1||U===5)){let K=y,H=3;U===1&&(K=[0,3,2,1][y]),this.emit(e,p,(u*2+K)*M,(f*2+H)*M,M,M,z,j,M,M),j+=M/2,this.emit(e,p,B,F,M,M/2,z,j,M,M/2)}else this.emit(e,p,B,F,M,M,z,j,M,M)}}drawTableEdge(e,n,s,i){if(!(n>=2816&&n<4352))return;let t=Math.floor((n-2048)/48),r=(n-2048)%48,a=t%8,o=Math.floor(t/8),l=a*2,d=(o-2)*3,_=Vn[r];for(let u=0;u<2;u++){let f=_[2+u][0],p=_[2+u][1];this.emit(e,1,(l*2+f)*M,(d*2+p)*M+M/2,M,M/2,s+u*M,i,M,M/2)}}build(e,n,s,i,t,r,a){let o=[new Map,new Map,[],new Map],l=new Map;if(!e)return{lower:o,upper:l};let{data:d,xs:_,ys:u,zs:f}=e;if(_<=0||u<=0)return{lower:o,upper:l};let p=Math.floor(a/30),m=Math.floor(s/ie),g=Math.floor(i/ie),w=Math.floor((s+t-1)/ie),y=Math.floor((i+r-1)/ie),U=_*u,B=z=>z>=2816&&z<4352&&n&&(n[z]&128)!==0,F=z=>n&&z>0&&z<n.length&&(n[z]&16)!==0;for(let z=g;z<=y;z++){let j=(z%u+u)%u,K=((z-1)%u+u)%u,H=z*ie-i;for(let oe=m;oe<=w;oe++){let ue=(oe%_+_)%_,ne=oe*ie-s,$=j*_+ue,X=d[$],W=f>1?d[$+U]:0,Y=f>2?d[$+U*2]:0,te=f>3?d[$+U*3]:0;X>0&&this.drawTile(F(X)?l:o[0],X,ne,H,p,n),W>0&&this.drawTile(F(W)?l:o[1],W,ne,H,p,n);let V=te&15;if(V&&o[2].push(ne,H,V),f>1){let Q=d[K*_+ue+U];B(Q)&&!B(W)&&!(X>=4352&&X<8192)&&this.drawTableEdge(o[1],Q,ne,H)}Y>0&&this.drawTile(F(Y)?l:o[3],Y,ne,H,p,n)}}return{lower:o,upper:l}}};var lt=1,dt=2,ct=3,_t=4,ft=5,ut={1:32,2:19,3:31,4:17,5:22},cn=class{constructor(e,n){this.r=e,this.bm=n,this.tables=new Map,this.tiles=new dn}uploadTable(e,n,s,i,t){let r=atob(n),a=r.length>>1,o=new Int16Array(a);for(let l=0;l<a;l++){let d=r.charCodeAt(l*2)|r.charCodeAt(l*2+1)<<8;o[l]=d>32767?d-65536:d}this.tables.set(e,{data:o,xs:s,ys:i,zs:t})}freeTable(e){this.tables.delete(e)}bmp(e){return e&&this.bm.map.get(e)||null}render(e){let n=e.length?e.split(",").map(Number):[],s=this.r;s.brightness=n.length?n[0]:255;let i=new Map,t=[],r=1,a=[];for(;r<n.length;){let u=n[r],f=ut[u];if(!f)break;if(u===ft){let p={uid:n[r+1],z:n[r+2],visible:n[r+3]!==0,rect:[n[r+4],n[r+5],n[r+6],n[r+7]],ox:n[r+8],oy:n[r+9],color:[n[r+10],n[r+11],n[r+12],n[r+13]],tone:[n[r+14],n[r+15],n[r+16],n[r+17]],flash:[n[r+18],n[r+19],n[r+20],n[r+21]],children:[]};i.set(p.uid,p),t.push({z:p.z,uid:p.uid,vp:p})}else a.push(r);r+=f}for(let u of a){let f=n[u],p=n[u+2],m=p?i.get(p):null,g=m?m.children:t;p&&!m||(f===_t?(g.push({z:0,uid:n[u+1],tilemap:u,layer:0}),g.push({z:200,uid:n[u+1],tilemap:u,layer:1})):g.push({z:n[u+3],uid:n[u+1],rec:u}))}let o=(u,f)=>u.z-f.z||u.uid-f.uid;t.sort(o);let l=s.width,d=s.height,_=[0,0,l,d];this.a=n,s.beginScene(),this.tileCache=new Map;for(let u of t)if(u.vp){let f=u.vp;if(!f.visible)continue;let p=Wn(f.rect,_);if(p[2]<=0||p[3]<=0)continue;f.children.sort(o),s.scissor(p);let m=f.rect[0]-f.ox,g=f.rect[1]-f.oy;for(let y of f.children)this.drawItem(y,m,g,f.rect,p);s.scissor(null);let w=f.flash[3]>0?f.flash:f.color;(w[3]>0||f.tone[0]||f.tone[1]||f.tone[2]||f.tone[3])&&s.applyEffect(p,w,f.tone)}else this.drawItem(u,0,0,_,_);s.scissor(null)}drawItem(e,n,s,i,t){let r=this.a;if(e.tilemap!==void 0)return this.drawTilemap(e.tilemap,e.layer,n,s,i,t);let a=e.rec;switch(r[a]){case lt:return this.drawSprite(a,n,s);case dt:return this.drawPlane(a,i,t);case ct:return this.drawWindow(a,n,s,t)}}drawSprite(e,n,s){let i=this.a,t=this.r,r=this.bmp(i[e+4]);if(!r)return;let a=i[e+5]+n,o=i[e+6]+s,l=i[e+7],d=i[e+8],_=i[e+9],u=i[e+10],f=i[e+11],p=i[e+12]!==0,m=i[e+13],g=i[e+14],w=i[e+15],y=i[e+16],U=i[e+17]/255,B=i[e+18],F=i[e+19],z=i[e+20]/255,j=[i[e+21],i[e+22],i[e+23],i[e+24]],K=[i[e+25],i[e+26],i[e+27],i[e+28]],H=i[e+29],oe=i[e+30],ue=i[e+31];if(U<=0||_===0||u===0)return;let ne=w,$=0,X=0;if(m<0&&($=-m,w+=m,m=0),g<0&&(X=-g,y+=g,g=0),m+w>r.w&&(w=r.w-m),g+y>r.h&&(y=r.h-g),w<=0||y<=0)return;let W=t.texFor(r),Y=r.w,te=r.h,V=m/Y,Q=(m+w)/Y,pe=g/te,Ee=(g+y)/te;if(p){let I=V;V=Q,Q=I,$=ne-$-w}let h=F>0?(g+y-F)/te:2;if(t.useSprite(W,U,j,K,h,z,B),H>0&&f===0){for(let C=0;C<y;C+=2){let G=Math.min(2,y-C),L=(ue+(X+C)*360/Math.max(1,oe))*Math.PI/180,v=H*Math.sin(L),R=a+($-l+v)*_,A=o+(X+C-d)*u;t.rect(R,A,w*_,G*u,V,(g+C)/te,Q,(g+C+G)/te)}t.flush();return}let b=($-l)*_,E=(X-d)*u,N=($+w-l)*_,x=(X+y-d)*u;if(f===0)t.rect(a+b,o+E,N-b,x-E,V,pe,Q,Ee);else{let I=-f*Math.PI/180,C=Math.cos(I),G=Math.sin(I),L=(he,Se)=>[a+he*C-Se*G,o+he*G+Se*C],v=L(b,E),R=L(N,E),A=L(b,x),se=L(N,x);t.quad(v[0],v[1],R[0],R[1],A[0],A[1],se[0],se[1],V,pe,Q,Ee)}t.flush()}drawPlane(e,n,s){let i=this.a,t=this.r,r=this.bmp(i[e+4]);if(!r)return;let a=i[e+5],o=i[e+6],l=i[e+7]||1,d=i[e+8]||1,_=i[e+9]/255,u=i[e+10],f=[i[e+11],i[e+12],i[e+13],i[e+14]],p=[i[e+15],i[e+16],i[e+17],i[e+18]];if(_<=0)return;let m=t.texFor(r);t.setRepeat(r,!0);let g=s[0],w=s[1],y=s[2],U=s[3],B=r.w*l,F=r.h*d,z=(g-n[0]+a)/B,j=(w-n[1]+o)/F,K=z+y/B,H=j+U/F;t.useSprite(m,_,f,p,2,1,u),t.rect(g,w,y,U,z,j,K,H),t.flush(),t.setRepeat(r,!1)}drawWindow(e,n,s,i){let t=this.a,r=this.r,a=this.bmp(t[e+4]),o=this.bmp(t[e+5]),l=t[e+6]+n,d=t[e+7]+s,_=t[e+8],u=t[e+9],f=t[e+10],p=t[e+11],m=t[e+12],g=t[e+13],w=t[e+14]/255,y=t[e+15]/255,U=t[e+16]/255,B=t[e+17],F=t[e+18],z=t[e+19],j=t[e+20],K=t[e+21],H=t[e+22]!==0,oe=t[e+23]!==0,ue=t[e+24]!==0,ne=[t[e+25],t[e+26],t[e+27],t[e+28]],$=t[e+29],X=t[e+30]!==0;if(_<=0||u<=0||B<=0)return;let W=Math.round(u*B/255),Y=d+Math.round((u-W)/2);if(a&&W>0){let b=r.texFor(a),E=a.w,N=a.h,x=(v,R,A,se,he,Se,Ke,Ve)=>{Ke<=0||Ve<=0||r.rect(he,Se,Ke,Ve,v/E,R/N,(v+A)/E,(R+se)/N)},I=l+2,C=Y+2,G=_-4,L=W-4;if(G>0&&L>0&&y*w>0){r.useSprite(b,y*w,null,ne),x(0,0,64,64,I,C,G,L),r.flush(),r.useSprite(b,y*w,null,ne);for(let v=0;v<L;v+=64){let R=Math.min(64,L-v);for(let A=0;A<G;A+=64){let se=Math.min(64,G-A);x(0,64,se,R,I+A,C+v,se,R)}}r.flush()}if(w>0){r.useSprite(b,w,null,null);let v=16,R=Math.min(v,Math.floor(W/2)),A=Math.min(v,Math.floor(_/2));x(64,0,A,R,l,Y,A,R),x(128-A,0,A,R,l+_-A,Y,A,R),x(64,64-R,A,R,l,Y+W-R,A,R),x(128-A,64-R,A,R,l+_-A,Y+W-R,A,R),x(64+v,0,32,R,l+A,Y,_-A*2,R),x(64+v,64-R,32,R,l+A,Y+W-R,_-A*2,R),x(64,v,A,32,l,Y+R,A,W-R*2),x(128-A,v,A,32,l+_-A,Y+R,A,W-R*2),r.flush()}}if(B<255)return;let te=[l+m,d+m,_-m*2,u-m-g],V=Wn(te,i);if(a&&j>0&&K>0&&V[2]>0&&V[3]>0){let b=r.texFor(a),E=a.w,N=a.h,x=1;if(H){let A=$%40;x=(255-(A<20?A:40-A)*6)/255}else x=.6;let I=l+m+F-(X?f:0),C=d+m+z-(X?p:0);r.scissor(V),r.useSprite(b,x*U,null,null);let G=4,L=(A,se,he,Se,Ke,Ve,Nn,In)=>{Nn<=0||In<=0||r.rect(Ke,Ve,Nn,In,A/E,se/N,(A+he)/E,(se+Se)/N)},v=Math.min(G,Math.floor(j/2)),R=Math.min(G,Math.floor(K/2));L(64,64,v,R,I,C,v,R),L(96-v,64,v,R,I+j-v,C,v,R),L(64,96-R,v,R,I,C+K-R,v,R),L(96-v,96-R,v,R,I+j-v,C+K-R,v,R),L(64+G,64,32-G*2,R,I+v,C,j-v*2,R),L(64+G,96-R,32-G*2,R,I+v,C+K-R,j-v*2,R),L(64,64+G,v,32-G*2,I,C+R,v,K-R*2),L(96-v,64+G,v,32-G*2,I+j-v,C+R,v,K-R*2),L(64+G,64+G,32-G*2,32-G*2,I+v,C+R,j-v*2,K-R*2),r.flush(),r.scissor(i)}if(o&&U>0&&V[2]>0&&V[3]>0){let b=r.texFor(o);r.scissor(V),r.useSprite(b,U,null,null),r.rect(l+m-f,d+m-p,o.w,o.h,0,0,1,1),r.flush(),r.scissor(i)}if(!a)return;let Q=r.texFor(a),pe=a.w,Ee=a.h,h=(b,E,N,x,I,C)=>r.rect(I,C,N,x,b/pe,E/Ee,(b+N)/pe,(E+x)/Ee);if(ue&&o){r.useSprite(Q,1,null,null);let b=_-m*2,E=u-m-g;p>0&&h(88,16,16,8,l+_/2-8,d+4),o.h-p>E&&h(88,40,16,8,l+_/2-8,d+u-12),f>0&&h(80,24,8,16,l+4,d+u/2-8),o.w-f>b&&h(104,24,8,16,l+_-12,d+u/2-8),r.flush()}if(oe){let b=Math.floor($/8)%4;r.useSprite(Q,1,null,null),h(96+b%2*16,64+Math.floor(b/2)*16,16,16,l+_/2-8,d+u-16),r.flush()}}drawTilemap(e,n,s,i,t,r){let a=this.a,o=this.r,l=this.tileCache.get(e);if(!l){let p=a[e+3],m=a[e+4],g=a[e+5],w=this.tables.get(a[e+15]),y=this.tables.get(a[e+16]);l=this.tiles.build(w,y?y.data:null,p+t[0]-s,m+t[1]-i,t[2],t[3],g),this.tileCache.set(e,l)}let d=[];for(let p=0;p<9;p++)d.push(this.bmp(a[e+6+p]));let _=t[0],u=t[1],f=p=>{for(let[m,g]of p){let w=d[m];if(!w)continue;let y=o.texFor(w),U=w.w,B=w.h;o.useSprite(y,1,null,null);for(let F=0;F<g.length;F+=8){let z=g[F+4],j=g[F+5],K=g[F+6],H=g[F+7];o.rect(_+g[F],u+g[F+1],g[F+2],g[F+3],z/U,j/B,(z+K)/U,(j+H)/B)}o.flush()}};if(n===0){f(l.lower[0]),f(l.lower[1]);let p=l.lower[2];if(p.length)for(let m=0;m<p.length;m+=3){let g=p[m+2];for(let w=0;w<4;w++)g&1<<w&&o.fillRect(_+p[m]+w%2*16,u+p[m+1]+Math.floor(w/2)*16,16,16,0,0,0,.5)}f(l.lower[3])}else f(l.upper)}};function Wn(c,e){let n=Math.max(c[0],e[0]),s=Math.max(c[1],e[1]),i=Math.min(c[0]+c[2],e[0]+e[2]),t=Math.min(c[1]+c[3],e[1]+e[3]);return[n,s,Math.max(0,i-n),Math.max(0,t-s)]}var S={DOWN:0,LEFT:1,RIGHT:2,UP:3,A:4,B:5,C:6,X:7,Y:8,Z:9,L:10,R:11,SHIFT:12,CTRL:13,ALT:14,F5:15,F6:16,F7:17,F8:18,F9:19},Yn=20,pt={ArrowDown:[S.DOWN],ArrowLeft:[S.LEFT],ArrowRight:[S.RIGHT],ArrowUp:[S.UP],Numpad2:[S.DOWN],Numpad4:[S.LEFT],Numpad6:[S.RIGHT],Numpad8:[S.UP],Space:[S.C],Enter:[S.C],NumpadEnter:[S.C],KeyZ:[S.C],Escape:[S.B],KeyX:[S.B],Numpad0:[S.B],Insert:[S.B],ShiftLeft:[S.A,S.SHIFT],ShiftRight:[S.A,S.SHIFT],KeyA:[S.X],KeyS:[S.Y],KeyD:[S.Z],KeyQ:[S.L],PageUp:[S.L],KeyW:[S.R],PageDown:[S.R],ControlLeft:[S.CTRL],ControlRight:[S.CTRL],AltLeft:[S.ALT],AltRight:[S.ALT],F5:[S.F5],F6:[S.F6],F7:[S.F7],F8:[S.F8],F9:[S.F9]},_n=class{constructor(){this.keyMask=0,this.nativeMask=0,this.prev=0,this.latched=0,this.counts=new Int32Array(Yn),this.dirOrder=[],this.onReset=null,this.onAnyKey=null,window.addEventListener("keydown",e=>this.key(e,!0)),window.addEventListener("keyup",e=>this.key(e,!1)),window.addEventListener("blur",()=>{this.keyMask=0})}key(e,n){if(e.code==="F12"&&n){this.onReset&&this.onReset(),e.preventDefault();return}let s=pt[e.code];if(s){e.preventDefault();for(let i of s)n?(this.keyMask|=1<<i,this.latched|=1<<i):this.keyMask&=~(1<<i);n&&this.onAnyKey&&this.onAnyKey()}}setNative(e){e|=0,this.latched|=e&~this.nativeMask,this.nativeMask=e,e&&this.onAnyKey&&this.onAnyKey()}current(){return this.keyMask|this.nativeMask}update(){let e=this.current()|this.latched&~this.prev;this.latched=0;let n=e&~this.prev,s=0;for(let u=0;u<Yn;u++)if(e&1<<u){let f=++this.counts[u];(f===1||f>=24&&(f-24)%6===0)&&(s|=1<<u)}else this.counts[u]=0;for(let[u,f]of[[S.DOWN,2],[S.LEFT,4],[S.RIGHT,6],[S.UP,8]]){let p=this.dirOrder.indexOf(f);e&1<<u?p<0&&this.dirOrder.push(f):p>=0&&this.dirOrder.splice(p,1)}let i=0,t=!!(e&1<<S.DOWN),r=!!(e&1<<S.UP),a=!!(e&1<<S.LEFT),o=!!(e&1<<S.RIGHT),l=t&&!r?2:r&&!t?8:0,d=a&&!o?4:o&&!a?6:0;for(let u=this.dirOrder.length-1;u>=0;u--){let f=this.dirOrder[u];if(f===l||f===d){i=f;break}}let _=0;return d&&l?_=l===2?d===4?1:3:d===4?7:9:_=d||l,this.prev=e,`${e},${n},${s},${i},${_}`}};var Z=c=>document.getElementById(c);function ht(c){let e=atob(c),n=new Uint8Array(e.length);for(let s=0;s<e.length;s++)n[s]=e.charCodeAt(s);return n}function mt(c){let e="";for(let s=0;s<c.length;s+=32768)e+=String.fromCharCode.apply(null,c.subarray(s,s+32768));return btoa(e)}var Sn={resolve:null,show(c,e,n){Z("ov-title").textContent=c,Z("ov-body").textContent=e,Z("ov-hint").textContent=n||"",Z("overlay").style.display="flex"},hide(){Z("overlay").style.display="none"},wait(c){return new Promise(e=>{let n=!1;setTimeout(()=>{n=!0},250);let s=()=>{n&&(Z("overlay").removeEventListener("pointerup",s),c.onAnyKey=null,this.hide(),e())};Z("overlay").addEventListener("pointerup",s),c.onAnyKey=s})}};function gt(c,e){let n=new Map,s=i=>{let t=n;for(let r of i){let a=t.get(r);a instanceof _e||(a=new _e(new Map),t.set(r,a)),t=a.contents}return t};for(let i of c){let t=i.split("/").filter(o=>o),r=t.pop();if(!r)continue;let a=s(t);a.has(r)||a.set(r,new ae(new Uint8Array(0)))}for(let[i,t]of Object.entries(e||{})){let r=i.split("/").filter(o=>o),a=r.pop();s(r).set(a,new ae(ht(t)))}return n}function An(c,e){let n=P.normalize(e).split("/").filter(i=>i&&i!=="."),s=c;for(let i=0;i<n.length;i++){let t=s.get(n[i]);if(!t)return null;if(i===n.length-1)return t;if(!(t instanceof _e))return null;s=t.contents}return null}window.addEventListener("error",c=>P.log("error","JS error: "+(c.message||c)+" @"+(c.filename||"")+":"+(c.lineno||"")));window.addEventListener("unhandledrejection",c=>P.log("error","Unhandled rejection: "+(c.reason&&c.reason.stack||c.reason)));async function wt(){let c=Z("loading");P.stage("page loaded (runtime 1144b8f 2026-11-17T15:11)");let e=await(await fetch(P.gameURL("__boot.json"))).json();P.stage(`boot info: engine=${e.engine} files=${(e.files||[]).length} preload=${Object.keys(e.preload||{}).length}`);let n=e.engine===2?2:3,s=e.settings||{};document.title=e.title||"TukuruPlayer";let i=Z("screen"),t=new on(i,544,416),r=new ln(P,t),a=new cn(t,r),o=new _n;i.addEventListener("webglcontextlost",()=>P.log("error","WebGL context lost (GPU process restarted?)")),i.addEventListener("webglcontextrestored",()=>P.log("error","WebGL context restored"));let l=()=>{let h=window.innerWidth,b=window.innerHeight,E=t.width,N=t.height,x=Math.min(h/E,b/N);s.scale==="integer"&&x>=1&&(x=Math.floor(x)),i.style.width=Math.floor(E*x)+"px",i.style.height=Math.floor(N*x)+"px";let I=b>h;Z("stage").style.alignItems=I&&s.portraitTop!==!1?"flex-start":"center",Z("stage").style.paddingTop=I?"env(safe-area-inset-top)":"0"};s.smooth||i.classList.add("pixelated"),window.addEventListener("resize",l),l(),s.showFPS&&(Z("fps").style.display="block");let d=(e.files||[]).filter(h=>/^fonts\/.+\.(ttf|otf|ttc)$/i.test(h));P.stage(`fonts: ${d.length}`),await Promise.all(d.map(h=>r.loadFont(h)));let _=!1,u=!1,f=null,p=performance.now(),m=60,g=0,w=performance.now(),y=h=>{if(requestAnimationFrame(y),!f||_)return;let b=1e3/m,E=h-p;if(E<b-1.5)return;p=E>b*3?h:p+b;let N=f;f=null,N(),g++,h-w>=1e3&&(Z("fps").textContent=g+" fps",g=0,w=h)};requestAnimationFrame(y),o.onReset=()=>{u=!0};let U=gt(e.files||[],e.preload||{}),B=new Map,F=new Set;for(let h of e.files||[])B.set(h.toLowerCase(),h),F.add(h);for(let h of Object.keys(e.preload||{}))B.set(h.toLowerCase(),h),F.delete(h);let z=async h=>{if(!F.has(h))return!0;let b=await fetch(P.gameURL(h));if(!b.ok)return!1;let E=new Uint8Array(await b.arrayBuffer()),N=h.split("/"),x=N.pop(),I=N.length?An(U,N.join("/")):null;return(I?I.contents:U).set(x,new ae(E)),F.delete(h),!0},j=/\.(png|jpe?g|bmp|gif|ogg|wav|mp3|m4a|mid|midi|wma|aac|ogv|mp4|avi|wmv|mpg|ttf|otf|ttc|rgss3a|rgss2a|rgssad|exe|dll|lnk|ico)$/i,K=[...F].filter(h=>!j.test(h)&&!/^(graphics|audio|movies|fonts|system)\//i.test(h));if(K.length){c.textContent=`\u30C7\u30FC\u30BF\u3092\u8AAD\u307F\u8FBC\u307F\u4E2D\u2026 (${K.length})`,P.stage(`preloading ${K.length} data files`);let h=0,b=async()=>{for(;h<K.length;){let E=K[h++];try{await z(E)}catch(N){P.log("error",`preload failed: ${E}: ${N}`)}}};await Promise.all(Array.from({length:6},b))}let H=new Map,oe=Ge.lineBuffered(h=>P.log("info",h)),ue=Ge.lineBuffered(h=>P.log("error",h)),ne=new xn([],["RUBYOPT=","HOME=/game"],[new Pe(new ae([])),oe,ue,new Ue("/game",U),new Ue("/tkrtmp",H)],{debug:!1});c.textContent="Ruby \u3092\u8D77\u52D5\u4E2D\u2026",P.stage("compiling ruby.wasm");let $;try{$=await WebAssembly.compileStreaming(fetch("ruby.wasm"))}catch{let b=await(await fetch("ruby.wasm")).arrayBuffer();$=await WebAssembly.compile(b)}let{vm:X,instance:W}=await $e.instantiateModule({module:$,wasip1:ne,args:["ruby.wasm","--disable-gems","-W0","-EUTF-8","-e_=0"]});P.stage("ruby vm ready");let Y=W?W.exports.memory:null,te=()=>{try{return Y?Math.round(Y.buffer.byteLength/1048576):-1}catch{return-1}},V=0,Q=(h,...b)=>P.post({type:"audio",op:h,args:b}),pe=0,Ee=null;window.TKR={engine:n,title:e.title||"",bmpCreate:(h,b)=>r.create(h,b),bmpLoad:h=>r.load(h),bmpW:h=>r.width(h),bmpH:h=>r.height(h),bmpDispose:h=>r.dispose(h),bmpDup:h=>r.dup(h),bmpBlt:(h,b,E,N,x,I,C,G,L)=>r.blt(h,b,E,N,x,I,C,G,L),bmpStretch:(h,b,E,N,x,I,C,G,L,v,R)=>r.stretchBlt(h,b,E,N,x,I,C,G,L,v,R),bmpFill:(h,b,E,N,x,I,C,G,L)=>r.fill(h,b,E,N,x,I,C,G,L),bmpGrad:(h,b,E,N,x,I,C,G,L,v,R,A,se,he)=>r.gradient(h,b,E,N,x,I,C,G,L,v,R,A,se,he),bmpClear:h=>r.clear(h),bmpClearRect:(h,b,E,N,x)=>r.clearRect(h,b,E,N,x),bmpGetPixel:(h,b,E)=>r.getPixel(h,b,E),bmpSetPixel:(h,b,E,N,x,I,C)=>r.setPixel(h,b,E,N,x,I,C),bmpHue:(h,b)=>r.hueChange(h,b),bmpBlur:h=>r.blur(h),bmpRadialBlur:(h,b,E)=>r.radialBlur(h,b,E),bmpDrawText:(h,b,E,N,x,I,C,G)=>r.drawText(h,b,E,N,x,I,C,G),textSize:(h,b)=>r.textSize(h,b),bitmapMB:()=>r.memoryMB(),bitmapCount:()=>r.map.size,fontExists:h=>r.fontExists(h)?1:0,tableUpload:(h,b,E,N,x)=>a.uploadTable(h,b,E,N,x),tableFree:h=>a.freeTable(h),render:h=>{a.render(h),t.present(),V++,(V===1||V%120===0)&&P.stage(`frame ${V}: wasm ${te()}MB, bitmaps ${r.map.size} (${r.memoryMB()}MB), ${t.width}x${t.height}`)},frame:()=>new Promise(h=>{if(u){u=!1,h("reset");return}f=()=>{if(u){u=!1,h("reset");return}h("")}}),setFrameRate:h=>{m=Math.max(10,Math.min(120,h))},freeze:h=>{a.render(h),t.freeze()},unfreeze:()=>{t.frozen=!1,t.transition=null},transitionStep:(h,b,E,N)=>{let x=null;if(E){let I=r.map.get(E);I&&(x=t.texFor(I))}t.transition={prog:b,maskTex:x,vague:N/255},a.render(h),t.present()},snap:h=>{a.render(h);let b=t.snapshotPixels();return r.fromPixels(t.width,t.height,b)},resize:(h,b)=>{h===t.width&&b===t.height||(t.resize(h,b),l(),P.stage(`resize_screen ${h}x${b}`),P.post({type:"resolution",w:h,h:b}))},inputUpdate:()=>o.update(),audio:Q,bgmPos:()=>pe,loadData:async h=>{let b=await fetch(P.gameURL(h));if(!b.ok)throw new Error("Unable to find file: "+h);let E=new Uint8Array(await b.arrayBuffer());return H.set("load.bin",new ae(E)),"/tkrtmp/load.bin"},syncFile:h=>{let b=An(U,h);return!b||!(b instanceof ae)?!1:(P.post({type:"save",path:P.normalize(h),data:mt(b.data)}),!0)},deleteFile:h=>{P.post({type:"delete",path:P.normalize(h)})},fsResolve:h=>{let b=P.normalize(h);return An(U,b)?b:B.get(b.toLowerCase())||""},isPlaceholder:h=>F.has(h)?1:0,materialize:h=>z(h),log:h=>P.log("info",h),msgbox:async h=>{Sn.show(e.title||"",h,"\u30BF\u30C3\u30D7 / \u30DC\u30BF\u30F3\u3067\u9589\u3058\u308B"),await Sn.wait(o)},exit:()=>P.post({type:"exit"}),error:(h,b)=>{P.log("error",h+`
+}`;function Kn(c,e,n){let s=c.createShader(e);if(c.shaderSource(s,n),c.compileShader(s),!c.getShaderParameter(s,c.COMPILE_STATUS))throw new Error("Shader compile error: "+c.getShaderInfoLog(s));return s}function Tn(c,e,n){let s=c.createProgram();if(c.attachShader(s,Kn(c,c.VERTEX_SHADER,et)),c.attachShader(s,Kn(c,c.FRAGMENT_SHADER,e)),c.bindAttribLocation(s,0,"aPos"),c.bindAttribLocation(s,1,"aUV"),c.linkProgram(s),!c.getProgramParameter(s,c.LINK_STATUS))throw new Error("Program link error: "+c.getProgramInfoLog(s));let i={};for(let t of["uRes",...n])i[t]=c.getUniformLocation(s,t);return{p:s,u:i}}var on=class{constructor(e,n,s){this.canvas=e;let i=e.getContext("webgl2",{alpha:!1,antialias:!1,depth:!1,stencil:!1,premultipliedAlpha:!1,preserveDrawingBuffer:!1});if(!i)throw new Error("WebGL2 \u304C\u5229\u7528\u3067\u304D\u307E\u305B\u3093");this.gl=i,i.pixelStorei(i.UNPACK_PREMULTIPLY_ALPHA_WEBGL,!1),i.pixelStorei(i.UNPACK_COLORSPACE_CONVERSION_WEBGL,i.NONE),this.sprite=Tn(i,nt,["uTex","uOpacity","uColor","uTone","uBushV","uBushOpacity"]),this.flat=Tn(i,tt,["uFill"]),this.trans=Tn(i,st,["uCur","uFrozen","uMask","uProg","uVague","uUseMask"]),this.vao=i.createVertexArray(),i.bindVertexArray(this.vao),this.vbo=i.createBuffer(),i.bindBuffer(i.ARRAY_BUFFER,this.vbo),i.enableVertexAttribArray(0),i.enableVertexAttribArray(1),i.vertexAttribPointer(0,2,i.FLOAT,!1,16,0),i.vertexAttribPointer(1,2,i.FLOAT,!1,16,8),this.verts=new Float32Array(24*4096),this.nverts=0,this.brightness=255,this.frozen=!1,this.transition=null,this.resize(n,s)}makeTarget(e,n){let s=this.gl,i=s.createTexture();s.bindTexture(s.TEXTURE_2D,i),s.texImage2D(s.TEXTURE_2D,0,s.RGBA,e,n,0,s.RGBA,s.UNSIGNED_BYTE,null),s.texParameteri(s.TEXTURE_2D,s.TEXTURE_MIN_FILTER,s.NEAREST),s.texParameteri(s.TEXTURE_2D,s.TEXTURE_MAG_FILTER,s.NEAREST),s.texParameteri(s.TEXTURE_2D,s.TEXTURE_WRAP_S,s.CLAMP_TO_EDGE),s.texParameteri(s.TEXTURE_2D,s.TEXTURE_WRAP_T,s.CLAMP_TO_EDGE);let t=s.createFramebuffer();return s.bindFramebuffer(s.FRAMEBUFFER,t),s.framebufferTexture2D(s.FRAMEBUFFER,s.COLOR_ATTACHMENT0,s.TEXTURE_2D,i,0),s.bindFramebuffer(s.FRAMEBUFFER,null),{tex:i,fbo:t,w:e,h:n}}freeTarget(e){e&&(this.gl.deleteTexture(e.tex),this.gl.deleteFramebuffer(e.fbo))}resize(e,n){this.width=e,this.height=n,this.canvas.width=e,this.canvas.height=n;for(let s of["screen","temp","frozenT"])this.freeTarget(this[s]);this.screen=this.makeTarget(e,n),this.temp=this.makeTarget(e,n),this.frozenT=this.makeTarget(e,n)}texFor(e){let n=this.gl;if(e.tex||(e.tex=n.createTexture(),n.bindTexture(n.TEXTURE_2D,e.tex),n.texParameteri(n.TEXTURE_2D,n.TEXTURE_MIN_FILTER,n.NEAREST),n.texParameteri(n.TEXTURE_2D,n.TEXTURE_MAG_FILTER,n.NEAREST),n.texParameteri(n.TEXTURE_2D,n.TEXTURE_WRAP_S,n.CLAMP_TO_EDGE),n.texParameteri(n.TEXTURE_2D,n.TEXTURE_WRAP_T,n.CLAMP_TO_EDGE),e.texVersion=-1,e.texRepeat=!1),e.texVersion!==e.version){n.bindTexture(n.TEXTURE_2D,e.tex);let s=e.source();s&&e.texW===e.w&&e.texH===e.h?n.texSubImage2D(n.TEXTURE_2D,0,0,0,n.RGBA,n.UNSIGNED_BYTE,s):s?(n.texImage2D(n.TEXTURE_2D,0,n.RGBA,n.RGBA,n.UNSIGNED_BYTE,s),e.texW=e.w,e.texH=e.h):(n.texImage2D(n.TEXTURE_2D,0,n.RGBA,1,1,0,n.RGBA,n.UNSIGNED_BYTE,new Uint8Array(4)),e.texW=e.texH=1),e.texVersion=e.version}return e.tex}setRepeat(e,n){if(e.texRepeat===n)return;let s=this.gl;s.bindTexture(s.TEXTURE_2D,e.tex);let i=n?s.REPEAT:s.CLAMP_TO_EDGE;s.texParameteri(s.TEXTURE_2D,s.TEXTURE_WRAP_S,i),s.texParameteri(s.TEXTURE_2D,s.TEXTURE_WRAP_T,i),e.texRepeat=n}deleteTex(e){e.tex&&this.gl.deleteTexture(e.tex),e.tex=null}quad(e,n,s,i,t,r,a,o,l,d,_,u){this.nverts+6>this.verts.length/4&&this.grow();let f=this.verts,p=this.nverts*4;f[p++]=e,f[p++]=n,f[p++]=l,f[p++]=d,f[p++]=s,f[p++]=i,f[p++]=_,f[p++]=d,f[p++]=t,f[p++]=r,f[p++]=l,f[p++]=u,f[p++]=s,f[p++]=i,f[p++]=_,f[p++]=d,f[p++]=a,f[p++]=o,f[p++]=_,f[p++]=u,f[p++]=t,f[p++]=r,f[p++]=l,f[p++]=u,this.nverts+=6}rect(e,n,s,i,t,r,a,o){this.quad(e,n,e+s,n,e,n+i,e+s,n+i,t,r,a,o)}grow(){let e=new Float32Array(this.verts.length*2);e.set(this.verts),this.verts=e}flushWith(e){if(this.nverts===0)return;let n=this.gl;n.bindBuffer(n.ARRAY_BUFFER,this.vbo),n.bufferData(n.ARRAY_BUFFER,this.verts.subarray(0,this.nverts*4),n.STREAM_DRAW),n.drawArrays(n.TRIANGLES,0,this.nverts),this.nverts=0}setBlend(e){let n=this.gl;n.enable(n.BLEND),e===1?(n.blendEquation(n.FUNC_ADD),n.blendFuncSeparate(n.SRC_ALPHA,n.ONE,n.ZERO,n.ONE)):e===2?(n.blendEquationSeparate(n.FUNC_REVERSE_SUBTRACT,n.FUNC_ADD),n.blendFuncSeparate(n.SRC_ALPHA,n.ONE,n.ZERO,n.ONE)):(n.blendEquation(n.FUNC_ADD),n.blendFuncSeparate(n.SRC_ALPHA,n.ONE_MINUS_SRC_ALPHA,n.ONE,n.ONE_MINUS_SRC_ALPHA))}useSprite(e,n,s,i,t=2,r=1,a=0){let o=this.gl,l=this.sprite;o.useProgram(l.p),o.uniform2f(l.u.uRes,this.targetW,this.targetH),o.activeTexture(o.TEXTURE0),o.bindTexture(o.TEXTURE_2D,e),o.uniform1i(l.u.uTex,0),o.uniform1f(l.u.uOpacity,n),s?o.uniform4f(l.u.uColor,s[0]/255,s[1]/255,s[2]/255,s[3]/255):o.uniform4f(l.u.uColor,0,0,0,0),i?o.uniform4f(l.u.uTone,i[0]/255,i[1]/255,i[2]/255,i[3]/255):o.uniform4f(l.u.uTone,0,0,0,0),o.uniform1f(l.u.uBushV,t),o.uniform1f(l.u.uBushOpacity,r),this.setBlend(a)}flush(){this.flushWith()}fillRect(e,n,s,i,t,r,a,o,l=0){let d=this.gl;d.useProgram(this.flat.p),d.uniform2f(this.flat.u.uRes,this.targetW,this.targetH),d.uniform4f(this.flat.u.uFill,t,r,a,o),this.setBlend(l),this.rect(e,n,s,i,0,0,0,0),this.flushWith()}bindTarget(e){let n=this.gl;e?(n.bindFramebuffer(n.FRAMEBUFFER,e.fbo),n.viewport(0,0,e.w,e.h),this.targetW=e.w,this.targetH=e.h):(n.bindFramebuffer(n.FRAMEBUFFER,null),n.viewport(0,0,this.canvas.width,this.canvas.height),this.targetW=this.canvas.width,this.targetH=this.canvas.height)}scissor(e){let n=this.gl;if(!e){n.disable(n.SCISSOR_TEST);return}n.enable(n.SCISSOR_TEST);let s=Math.max(0,e[0]|0),i=Math.max(0,e[1]|0),t=Math.min(this.targetW,e[0]+e[2]|0),r=Math.min(this.targetH,e[1]+e[3]|0);n.scissor(s,this.targetH-Math.max(i,r),Math.max(0,t-s),Math.max(0,r-i))}applyEffect(e,n,s){let i=this.gl,t=this.width,r=this.height;i.bindTexture(i.TEXTURE_2D,this.temp.tex),i.copyTexSubImage2D(i.TEXTURE_2D,0,0,0,0,0,t,r);let a=Math.max(0,e[0]),o=Math.max(0,e[1]),l=Math.min(t,e[0]+e[2]),d=Math.min(r,e[1]+e[3]);l<=a||d<=o||(this.useSprite(this.temp.tex,1,n,s),i.disable(i.BLEND),this.rect(a,o,l-a,d-o,a/t,1-o/r,l/t,1-d/r),this.flushWith())}beginScene(){let e=this.gl;this.bindTarget(this.screen),e.disable(e.SCISSOR_TEST),e.clearColor(0,0,0,1),e.clear(e.COLOR_BUFFER_BIT)}composeTo(e){let n=this.gl;this.bindTarget(e),n.disable(n.SCISSOR_TEST);let s=this.targetW,i=this.targetH;this.useSprite(this.screen.tex,1,null,null),n.disable(n.BLEND),this.rect(0,0,s,i,0,1,1,0),this.flushWith(),this.brightness<255&&this.fillRect(0,0,s,i,0,0,0,1-this.brightness/255)}present(){let e=this.gl;if(this.frozen&&!this.transition){this.bindTarget(null),e.disable(e.SCISSOR_TEST),this.useSprite(this.frozenT.tex,1,null,null),e.disable(e.BLEND),this.rect(0,0,this.targetW,this.targetH,0,1,1,0),this.flushWith();return}if(this.transition){this.composeTo(this.temp),this.bindTarget(null);let n=this.trans;e.useProgram(n.p),e.uniform2f(n.u.uRes,this.targetW,this.targetH),e.activeTexture(e.TEXTURE0),e.bindTexture(e.TEXTURE_2D,this.temp.tex),e.uniform1i(n.u.uCur,0),e.activeTexture(e.TEXTURE1),e.bindTexture(e.TEXTURE_2D,this.frozenT.tex),e.uniform1i(n.u.uFrozen,1),e.activeTexture(e.TEXTURE2),e.bindTexture(e.TEXTURE_2D,this.transition.maskTex||this.temp.tex),e.uniform1i(n.u.uMask,2),e.uniform1f(n.u.uProg,this.transition.prog),e.uniform1f(n.u.uVague,this.transition.vague),e.uniform1i(n.u.uUseMask,this.transition.maskTex?1:0),e.disable(e.BLEND),this.rect(0,0,this.targetW,this.targetH,0,1,1,0),this.flushWith(),e.activeTexture(e.TEXTURE0);return}this.composeTo(null)}freeze(){this.composeTo(this.frozenT),this.frozen=!0}snapshotPixels(){let e=this.gl;this.composeTo(this.temp);let n=this.width,s=this.height,i=new Uint8Array(n*s*4);e.readPixels(0,0,n,s,e.RGBA,e.UNSIGNED_BYTE,i);let t=new Uint8ClampedArray(n*s*4),r=n*4;for(let a=0;a<s;a++)t.set(i.subarray((s-1-a)*r,(s-a)*r),a*r);return t}};var rt=['"Hiragino Sans"','"Hiragino Kaku Gothic ProN"','"Noto Sans JP"','"Noto Sans CJK JP"',"sans-serif"],ze=class{constructor(e,n,s=null){this.w=Math.max(1,e|0),this.h=Math.max(1,n|0),this.image=s,this.canvas=null,this.c=null,this.version=1,this.tex=null,this.texVersion=-1}ctx(){if(!this.c){let e=document.createElement("canvas");e.width=this.w,e.height=this.h;let n=e.getContext("2d");if(!n)return console.error(`canvas ${this.w}x${this.h} could not be created`),e.width=e.height=1,null;if(this.canvas=e,this.c=n,n.imageSmoothingEnabled=!1,this.image){try{n.drawImage(this.image,0,0)}catch(s){console.error("copy image failed",s)}this.image=null}}return this.c}source(){return this.canvas||this.image}touch(){this.version++}free(){this.canvas&&(this.canvas.width=0,this.canvas.height=0),this.canvas=null,this.c=null,this.image=null,this.pixels=null}};function it(c,e,n,s,i,t,r,a){return n<0&&(r-=n,i+=n,n=0),s<0&&(a-=s,t+=s,s=0),n+i>c&&(i=c-n),s+t>e&&(t=e-s),[n,s,i,t,r,a]}function De(c,e,n,s){return`rgba(${c|0},${e|0},${n|0},${(s/255).toFixed(4)})`}var ln=class{constructor(e,n){this.host=e,this.renderer=n,this.map=new Map,this.next=1,this.imageCache=new Map,this.fontFamilies=new Set,this.measureCtx=document.createElement("canvas").getContext("2d")}get(e){let n=this.map.get(e);if(!n)throw new Error("disposed bitmap");return n}add(e){let n=this.next++;return this.map.set(n,e),n}create(e,n){return this.add(new ze(e,n))}async decode(e){let n=await fetch(e);if(!n.ok)throw new Error("not found");let s=await n.blob(),i=null,t=null;try{i=await createImageBitmap(s)}catch{t=URL.createObjectURL(s);let a=new Image;a.src=t,await a.decode(),i=a}try{let r=i.width,a=i.height,o=document.createElement("canvas");o.width=Math.max(1,r),o.height=Math.max(1,a);let l=o.getContext("2d");if(!l)throw new Error(`canvas ${r}x${a} unavailable`);return l.drawImage(i,0,0),o}finally{i&&i.close&&i.close(),t&&URL.revokeObjectURL(t)}}guard(e,n,s){try{return n()}catch(i){this.errors=(this.errors||0)+1,this.errors<=20&&this.host.log("error",`${e} failed: ${i&&i.name}: ${i&&i.message} ${s?s():""}`);return}}describe(e){if(!e)return"null";let n=e.source();return`${n?n.tagName||n.constructor.name:"none"} ${e.w}x${e.h} src=${n?n.width+"x"+n.height:"-"}`}async load(e){let n=this.host.gameURL(e),s=this.imageCache.get(n);s?(this.imageCache.delete(n),this.imageCache.set(n,s)):(s={p:this.decode(n),bytes:0},this.imageCache.set(n,s));let i;try{i=await s.p}catch{throw this.imageCache.delete(n),new Error("Unable to find file: "+e)}return s.bytes=i.width*i.height*4,this.trimImageCache(),this.add(new ze(i.width,i.height,i))}trimImageCache(e=48*1048576){let n=0;for(let s of this.imageCache.values())n+=s.bytes;for(let[s,i]of this.imageCache){if(n<=e)break;i.bytes&&(n-=i.bytes,this.imageCache.delete(s))}}memoryMB(){let e=0;for(let n of this.map.values()){let s=n.w*n.h*4;e+=(n.canvas?s:0)+(n.tex?s:0)}return Math.round(e/1048576)}fromPixels(e,n,s){let i=new ze(e,n);return i.ctx().putImageData(new ImageData(s,e,n),0,0),this.add(i)}dup(e){let n=this.get(e),s=new ze(n.w,n.h);return n.canvas?s.ctx().drawImage(n.canvas,0,0):s.image=n.image,this.add(s)}dispose(e){let n=this.map.get(e);n&&(this.renderer.deleteTex(n),n.free(),this.map.delete(e))}width(e){return this.get(e).w}height(e){return this.get(e).h}blt(e,n,s,i,t,r,a,o,l){let d=this.get(e),_=this.get(i);if([t,r,a,o,n,s]=it(_.w,_.h,t,r,a,o,n,s),a<=0||o<=0||l<=0)return;let u=d.ctx(),f=_.source();!u||!f||(this.guard("blt",()=>{u.globalAlpha=Math.min(1,l/255),u.drawImage(f,t,r,a,o,n,s,a,o)},()=>`src=${this.describe(_)} dst=${this.describe(d)} rect=${t},${r},${a},${o}`),u.globalAlpha=1,d.touch())}stretchBlt(e,n,s,i,t,r,a,o,l,d,_){let u=this.get(e),f=this.get(r);if(l===0||d===0||i===0||t===0||_<=0)return;let p=i/l,m=t/d;if(a<0&&(n-=a*p,i+=a*p,l+=a,a=0),o<0&&(s-=o*m,t+=o*m,d+=o,o=0),a+l>f.w){let y=a+l-f.w;l-=y,i-=y*p}if(o+d>f.h){let y=o+d-f.h;d-=y,t-=y*m}if(l<=0||d<=0)return;let g=u.ctx(),w=f.source();!g||!w||(this.guard("stretch_blt",()=>{g.globalAlpha=Math.min(1,_/255),g.drawImage(w,a,o,l,d,n,s,i,t)},()=>`src=${this.describe(f)} dst=${this.describe(u)}`),g.globalAlpha=1,u.touch())}fill(e,n,s,i,t,r,a,o,l){let d=this.get(e),_=d.ctx();_.clearRect(n,s,i,t),l>0&&(_.fillStyle=De(r,a,o,l),_.fillRect(n,s,i,t)),d.touch()}gradient(e,n,s,i,t,r,a,o,l,d,_,u,f,p){let m=this.get(e),g=m.ctx();g.clearRect(n,s,i,t);let w=p?g.createLinearGradient(0,s,0,s+t):g.createLinearGradient(n,0,n+i,0);w.addColorStop(0,De(r,a,o,l)),w.addColorStop(1,De(d,_,u,f)),g.fillStyle=w,g.fillRect(n,s,i,t),m.touch()}clear(e){let n=this.get(e);!n.c&&!n.image||(n.ctx().clearRect(0,0,n.w,n.h),n.touch())}clearRect(e,n,s,i,t){let r=this.get(e);r.ctx().clearRect(n,s,i,t),r.touch()}getPixel(e,n,s){let i=this.get(e);if(n<0||s<0||n>=i.w||s>=i.h)return"0,0,0,0";if(i.w*i.h<=512*512){if(!i.pixels||i.pixelsVersion!==i.version){let l=i.source(),d=i.canvas?i.c:l&&l.getContext?l.getContext("2d"):i.ctx();if(!d||(i.pixels=this.guard("get_pixel",()=>d.getImageData(0,0,i.w,i.h).data)||null,i.pixelsVersion=i.version,!i.pixels))return"0,0,0,0"}let a=(s*i.w+n)*4,o=i.pixels;return`${o[a]},${o[a+1]},${o[a+2]},${o[a+3]}`}let t=i.ctx();if(!t)return"0,0,0,0";let r=this.guard("get_pixel",()=>t.getImageData(n,s,1,1).data);return r?`${r[0]},${r[1]},${r[2]},${r[3]}`:"0,0,0,0"}setPixel(e,n,s,i,t,r,a){let o=this.get(e);if(n<0||s<0||n>=o.w||s>=o.h)return;let l=new ImageData(1,1);l.data[0]=i,l.data[1]=t,l.data[2]=r,l.data[3]=a,o.ctx().putImageData(l,n,s),o.touch()}hueChange(e,n){let s=this.get(e),i=s.ctx(),t=i.getImageData(0,0,s.w,s.h),r=t.data,a=n*Math.PI/180,o=Math.cos(a),l=Math.sin(a),d=[.299+.701*o+.168*l,.587-.587*o+.33*l,.114-.114*o-.497*l,.299-.299*o-.328*l,.587+.413*o+.035*l,.114-.114*o+.292*l,.299-.3*o+1.25*l,.587-.588*o-1.05*l,.114+.886*o-.203*l];for(let _=0;_<r.length;_+=4){if(r[_+3]===0)continue;let u=r[_],f=r[_+1],p=r[_+2];r[_]=d[0]*u+d[1]*f+d[2]*p,r[_+1]=d[3]*u+d[4]*f+d[5]*p,r[_+2]=d[6]*u+d[7]*f+d[8]*p}i.putImageData(t,0,0),s.touch()}blur(e){let n=this.get(e),s=n.ctx(),i=n.w,t=n.h,a=s.getImageData(0,0,i,t).data,o=new Uint8ClampedArray(a.length);for(let l=0;l<t;l++)for(let d=0;d<i;d++){let _=0,u=0,f=0,p=0,m=0;for(let w=-1;w<=1;w++){let y=l+w;if(!(y<0||y>=t))for(let U=-1;U<=1;U++){let B=d+U;if(B<0||B>=i)continue;let F=(y*i+B)*4;_+=a[F],u+=a[F+1],f+=a[F+2],p+=a[F+3],m++}}let g=(l*i+d)*4;o[g]=_/m,o[g+1]=u/m,o[g+2]=f/m,o[g+3]=p/m}s.putImageData(new ImageData(o,i,t),0,0),n.touch()}radialBlur(e,n,s){let i=this.get(e),t=i.ctx();s=Math.max(2,Math.min(100,s|0));let r=document.createElement("canvas");r.width=i.w,r.height=i.h,r.getContext("2d").drawImage(i.canvas,0,0),t.clearRect(0,0,i.w,i.h);let a=i.w/2,o=i.h/2;for(let l=0;l<s;l++){let d=(l/(s-1)-.5)*n*Math.PI/180;t.save(),t.globalAlpha=1/(l+1),t.translate(a,o),t.rotate(d),t.drawImage(r,-a,-o),t.restore()}r.width=0,i.touch()}parseFont(e){let n=e.split(";"),i=(n[0]?n[0].split("|").filter(o=>o):[]).map(o=>'"'+o.replace(/"/g,"")+'"').concat(rt).join(","),t=Math.max(1,parseInt(n[1],10)||24),r=n[2]==="1";return{css:`${n[3]==="1"?"italic ":""}${r?"bold ":""}${t}px ${i}`,size:t,outline:n[4]==="1",shadow:n[5]==="1",color:n[6].split(",").map(Number),out:n[7].split(",").map(Number)}}textSize(e,n){let s=this.parseFont(e);return this.measureCtx.font=s.css,Math.ceil(this.measureCtx.measureText(n).width)}drawText(e,n,s,i,t,r,a,o){let l=this.get(e),d=l.ctx(),_=this.parseFont(o);d.font=_.css;let u=d.measureText(r),f=u.width;if(f<=0)return;let p=u.fontBoundingBoxAscent??_.size*.88,m=u.fontBoundingBoxDescent??_.size*.12,g=1;i>0&&f>i&&(g=Math.max(.4,i/f));let w=f*g,y=n;a===1?y=n+(i-w)/2:a===2&&(y=n+i-w);let U=Math.round(s+(t-(p+m))/2+p);d.save(),d.translate(y,U),g!==1&&d.scale(g,1),d.textBaseline="alphabetic",_.shadow&&(d.fillStyle=De(0,0,0,_.color[3]),d.fillText(r,1,1)),_.outline&&(d.strokeStyle=De(_.out[0],_.out[1],_.out[2],_.out[3]),d.lineWidth=2,d.lineJoin="round",d.strokeText(r,0,0)),d.fillStyle=De(_.color[0],_.color[1],_.color[2],_.color[3]),d.fillText(r,0,0),d.restore(),l.touch()}async loadFont(e){try{let n=await fetch(this.host.gameURL(e));if(!n.ok)return;let s=await n.arrayBuffer(),i=at(s);i.length===0&&i.push(e.split("/").pop().replace(/\.[^.]+$/,""));for(let t of i){if(this.fontFamilies.has(t))continue;let r=new FontFace(t,s);await r.load(),document.fonts.add(r),this.fontFamilies.add(t)}}catch(n){console.warn("font load failed",e,n)}}fontExists(e){if(this.fontFamilies.has(e))return!0;try{return document.fonts.check(`12px "${e}"`)}catch{return!1}}};function at(c){let e=new Set;try{let n=new DataView(c),s=0;n.getUint32(0)===1953784678&&(s=n.getUint32(12));let t=n.getUint16(s+4),r=-1;for(let l=0;l<t;l++){let d=s+12+l*16;n.getUint32(d)===1851878757&&(r=n.getUint32(d+8))}if(r<0)return[];let a=n.getUint16(r+2),o=r+n.getUint16(r+4);for(let l=0;l<a;l++){let d=r+6+l*12,_=n.getUint16(d),u=n.getUint16(d+2),f=n.getUint16(d+6),p=n.getUint16(d+8),m=n.getUint16(d+10);if(f!==1&&f!==4)continue;let g="";if(_===3||_===0)for(let w=0;w<p;w+=2)g+=String.fromCharCode(n.getUint16(o+m+w));else if(_===1&&u===0)for(let w=0;w<p;w++)g+=String.fromCharCode(n.getUint8(o+m+w));else continue;g&&f===1&&e.add(g)}}catch{}return[...e]}var Vn=[[[2,4],[1,4],[2,3],[1,3]],[[2,0],[1,4],[2,3],[1,3]],[[2,4],[3,0],[2,3],[1,3]],[[2,0],[3,0],[2,3],[1,3]],[[2,4],[1,4],[2,3],[3,1]],[[2,0],[1,4],[2,3],[3,1]],[[2,4],[3,0],[2,3],[3,1]],[[2,0],[3,0],[2,3],[3,1]],[[2,4],[1,4],[2,1],[1,3]],[[2,0],[1,4],[2,1],[1,3]],[[2,4],[3,0],[2,1],[1,3]],[[2,0],[3,0],[2,1],[1,3]],[[2,4],[1,4],[2,1],[3,1]],[[2,0],[1,4],[2,1],[3,1]],[[2,4],[3,0],[2,1],[3,1]],[[2,0],[3,0],[2,1],[3,1]],[[0,4],[1,4],[0,3],[1,3]],[[0,4],[3,0],[0,3],[1,3]],[[0,4],[1,4],[0,3],[3,1]],[[0,4],[3,0],[0,3],[3,1]],[[2,2],[1,2],[2,3],[1,3]],[[2,2],[1,2],[2,3],[3,1]],[[2,2],[1,2],[2,1],[1,3]],[[2,2],[1,2],[2,1],[3,1]],[[2,4],[3,4],[2,3],[3,3]],[[2,4],[3,4],[2,1],[3,3]],[[2,0],[3,4],[2,3],[3,3]],[[2,0],[3,4],[2,1],[3,3]],[[2,4],[1,4],[2,5],[1,5]],[[2,0],[1,4],[2,5],[1,5]],[[2,4],[3,0],[2,5],[1,5]],[[2,0],[3,0],[2,5],[1,5]],[[0,4],[3,4],[0,3],[3,3]],[[2,2],[1,2],[2,5],[1,5]],[[0,2],[1,2],[0,3],[1,3]],[[0,2],[1,2],[0,3],[3,1]],[[2,2],[3,2],[2,3],[3,3]],[[2,2],[3,2],[2,1],[3,3]],[[2,4],[3,4],[2,5],[3,5]],[[2,0],[3,4],[2,5],[3,5]],[[0,4],[1,4],[0,5],[1,5]],[[0,4],[3,0],[0,5],[1,5]],[[0,2],[3,2],[0,3],[3,3]],[[0,2],[1,2],[0,5],[1,5]],[[0,4],[3,4],[0,5],[3,5]],[[2,2],[3,2],[2,5],[3,5]],[[0,2],[3,2],[0,5],[3,5]],[[0,0],[1,0],[0,1],[1,1]]],Hn=[[[2,2],[1,2],[2,1],[1,1]],[[0,2],[1,2],[0,1],[1,1]],[[2,0],[1,0],[2,1],[1,1]],[[0,0],[1,0],[0,1],[1,1]],[[2,2],[3,2],[2,1],[3,1]],[[0,2],[3,2],[0,1],[3,1]],[[2,0],[3,0],[2,1],[3,1]],[[0,0],[3,0],[0,1],[3,1]],[[2,2],[1,2],[2,3],[1,3]],[[0,2],[1,2],[0,3],[1,3]],[[2,0],[1,0],[2,3],[1,3]],[[0,0],[1,0],[0,3],[1,3]],[[2,2],[3,2],[2,3],[3,3]],[[0,2],[3,2],[0,3],[3,3]],[[2,0],[3,0],[2,3],[3,3]],[[0,0],[3,0],[0,3],[3,3]]],ot=[[[2,0],[1,0],[2,1],[1,1]],[[0,0],[1,0],[0,1],[1,1]],[[2,0],[3,0],[2,1],[3,1]],[[0,0],[3,0],[0,1],[3,1]]],ie=32,M=16,dn=class{constructor(){this.passes=[]}static isAuto(e){return e>=2048}emit(e,n,s,i,t,r,a,o,l,d){let _=e.get(n);_||(_=[],e.set(n,_)),_.push(a,o,l,d,s,i,t,r)}drawTile(e,n,s,i,t,r){n<=0||n>=8192||(n>=2048?this.drawAutotile(e,n,s,i,t,r):this.drawNormal(e,n,s,i))}drawNormal(e,n,s,i){let t;if(n>=1536&&n<1664)t=4;else if(n<1024)t=5+Math.floor(n/256);else return;let r=(Math.floor(n/128)%2*8+n%8)*ie,a=Math.floor(n%256/8)%16*ie;this.emit(e,t,r,a,ie,ie,s,i,ie,ie)}drawAutotile(e,n,s,i,t,r){let a=Vn,o=Math.floor((n-2048)/48),l=(n-2048)%48,d=o%8,_=Math.floor(o/8),u=0,f=0,p=0,m=!1;if(n<2816){let w=[0,1,2,1][t%4];p=0,o===0?(u=w*2,f=0):o===1?(u=w*2,f=3):o===2?(u=6,f=0):o===3?(u=6,f=3):(u=Math.floor(d/4)*8,f=_*6+Math.floor(d/2)%2*3,o%2===0?u+=w*2:(u+=6,a=ot,f+=t%3))}else n<4352?(p=1,u=d*2,f=(_-2)*3,m=r?(r[n]&128)!==0:!1):n<5888?(p=2,u=d*2,f=(_-6)*2,a=Hn):(p=3,u=d*2,f=Math.floor((_-10)*2.5+(_%2===1?.5:0)),_%2===1&&(a=Hn));let g=a[l];if(g)for(let w=0;w<4;w++){let y=g[w][0],U=g[w][1],B=(u*2+y)*M,F=(f*2+U)*M,z=s+w%2*M,j=i+Math.floor(w/2)*M;if(m&&(U===1||U===5)){let K=y,H=3;U===1&&(K=[0,3,2,1][y]),this.emit(e,p,(u*2+K)*M,(f*2+H)*M,M,M,z,j,M,M),j+=M/2,this.emit(e,p,B,F,M,M/2,z,j,M,M/2)}else this.emit(e,p,B,F,M,M,z,j,M,M)}}drawTableEdge(e,n,s,i){if(!(n>=2816&&n<4352))return;let t=Math.floor((n-2048)/48),r=(n-2048)%48,a=t%8,o=Math.floor(t/8),l=a*2,d=(o-2)*3,_=Vn[r];for(let u=0;u<2;u++){let f=_[2+u][0],p=_[2+u][1];this.emit(e,1,(l*2+f)*M,(d*2+p)*M+M/2,M,M/2,s+u*M,i,M,M/2)}}build(e,n,s,i,t,r,a){let o=[new Map,new Map,[],new Map],l=new Map;if(!e)return{lower:o,upper:l};let{data:d,xs:_,ys:u,zs:f}=e;if(_<=0||u<=0)return{lower:o,upper:l};let p=Math.floor(a/30),m=Math.floor(s/ie),g=Math.floor(i/ie),w=Math.floor((s+t-1)/ie),y=Math.floor((i+r-1)/ie),U=_*u,B=z=>z>=2816&&z<4352&&n&&(n[z]&128)!==0,F=z=>n&&z>0&&z<n.length&&(n[z]&16)!==0;for(let z=g;z<=y;z++){let j=(z%u+u)%u,K=((z-1)%u+u)%u,H=z*ie-i;for(let oe=m;oe<=w;oe++){let ue=(oe%_+_)%_,ne=oe*ie-s,$=j*_+ue,X=d[$],W=f>1?d[$+U]:0,Y=f>2?d[$+U*2]:0,te=f>3?d[$+U*3]:0;X>0&&this.drawTile(F(X)?l:o[0],X,ne,H,p,n),W>0&&this.drawTile(F(W)?l:o[1],W,ne,H,p,n);let V=te&15;if(V&&o[2].push(ne,H,V),f>1){let Q=d[K*_+ue+U];B(Q)&&!B(W)&&!(X>=4352&&X<8192)&&this.drawTableEdge(o[1],Q,ne,H)}Y>0&&this.drawTile(F(Y)?l:o[3],Y,ne,H,p,n)}}return{lower:o,upper:l}}};var lt=1,dt=2,ct=3,_t=4,ft=5,ut={1:32,2:19,3:31,4:17,5:22},cn=class{constructor(e,n){this.r=e,this.bm=n,this.tables=new Map,this.tiles=new dn}uploadTable(e,n,s,i,t){let r=atob(n),a=r.length>>1,o=new Int16Array(a);for(let l=0;l<a;l++){let d=r.charCodeAt(l*2)|r.charCodeAt(l*2+1)<<8;o[l]=d>32767?d-65536:d}this.tables.set(e,{data:o,xs:s,ys:i,zs:t})}freeTable(e){this.tables.delete(e)}bmp(e){return e&&this.bm.map.get(e)||null}render(e){let n=e.length?e.split(",").map(Number):[],s=this.r;s.brightness=n.length?n[0]:255;let i=new Map,t=[],r=1,a=[];for(;r<n.length;){let u=n[r],f=ut[u];if(!f)break;if(u===ft){let p={uid:n[r+1],z:n[r+2],visible:n[r+3]!==0,rect:[n[r+4],n[r+5],n[r+6],n[r+7]],ox:n[r+8],oy:n[r+9],color:[n[r+10],n[r+11],n[r+12],n[r+13]],tone:[n[r+14],n[r+15],n[r+16],n[r+17]],flash:[n[r+18],n[r+19],n[r+20],n[r+21]],children:[]};i.set(p.uid,p),t.push({z:p.z,uid:p.uid,vp:p})}else a.push(r);r+=f}for(let u of a){let f=n[u],p=n[u+2],m=p?i.get(p):null,g=m?m.children:t;p&&!m||(f===_t?(g.push({z:0,uid:n[u+1],tilemap:u,layer:0}),g.push({z:200,uid:n[u+1],tilemap:u,layer:1})):g.push({z:n[u+3],uid:n[u+1],rec:u}))}let o=(u,f)=>u.z-f.z||u.uid-f.uid;t.sort(o);let l=s.width,d=s.height,_=[0,0,l,d];this.a=n,s.beginScene(),this.tileCache=new Map;for(let u of t)if(u.vp){let f=u.vp;if(!f.visible)continue;let p=Wn(f.rect,_);if(p[2]<=0||p[3]<=0)continue;f.children.sort(o),s.scissor(p);let m=f.rect[0]-f.ox,g=f.rect[1]-f.oy;for(let y of f.children)this.drawItem(y,m,g,f.rect,p);s.scissor(null);let w=f.flash[3]>0?f.flash:f.color;(w[3]>0||f.tone[0]||f.tone[1]||f.tone[2]||f.tone[3])&&s.applyEffect(p,w,f.tone)}else this.drawItem(u,0,0,_,_);s.scissor(null)}drawItem(e,n,s,i,t){let r=this.a;if(e.tilemap!==void 0)return this.drawTilemap(e.tilemap,e.layer,n,s,i,t);let a=e.rec;switch(r[a]){case lt:return this.drawSprite(a,n,s);case dt:return this.drawPlane(a,i,t);case ct:return this.drawWindow(a,n,s,t)}}drawSprite(e,n,s){let i=this.a,t=this.r,r=this.bmp(i[e+4]);if(!r)return;let a=i[e+5]+n,o=i[e+6]+s,l=i[e+7],d=i[e+8],_=i[e+9],u=i[e+10],f=i[e+11],p=i[e+12]!==0,m=i[e+13],g=i[e+14],w=i[e+15],y=i[e+16],U=i[e+17]/255,B=i[e+18],F=i[e+19],z=i[e+20]/255,j=[i[e+21],i[e+22],i[e+23],i[e+24]],K=[i[e+25],i[e+26],i[e+27],i[e+28]],H=i[e+29],oe=i[e+30],ue=i[e+31];if(U<=0||_===0||u===0)return;let ne=w,$=0,X=0;if(m<0&&($=-m,w+=m,m=0),g<0&&(X=-g,y+=g,g=0),m+w>r.w&&(w=r.w-m),g+y>r.h&&(y=r.h-g),w<=0||y<=0)return;let W=t.texFor(r),Y=r.w,te=r.h,V=m/Y,Q=(m+w)/Y,pe=g/te,Ee=(g+y)/te;if(p){let I=V;V=Q,Q=I,$=ne-$-w}let h=F>0?(g+y-F)/te:2;if(t.useSprite(W,U,j,K,h,z,B),H>0&&f===0){for(let C=0;C<y;C+=2){let G=Math.min(2,y-C),L=(ue+(X+C)*360/Math.max(1,oe))*Math.PI/180,v=H*Math.sin(L),R=a+($-l+v)*_,A=o+(X+C-d)*u;t.rect(R,A,w*_,G*u,V,(g+C)/te,Q,(g+C+G)/te)}t.flush();return}let b=($-l)*_,E=(X-d)*u,N=($+w-l)*_,x=(X+y-d)*u;if(f===0)t.rect(a+b,o+E,N-b,x-E,V,pe,Q,Ee);else{let I=-f*Math.PI/180,C=Math.cos(I),G=Math.sin(I),L=(he,Se)=>[a+he*C-Se*G,o+he*G+Se*C],v=L(b,E),R=L(N,E),A=L(b,x),se=L(N,x);t.quad(v[0],v[1],R[0],R[1],A[0],A[1],se[0],se[1],V,pe,Q,Ee)}t.flush()}drawPlane(e,n,s){let i=this.a,t=this.r,r=this.bmp(i[e+4]);if(!r)return;let a=i[e+5],o=i[e+6],l=i[e+7]||1,d=i[e+8]||1,_=i[e+9]/255,u=i[e+10],f=[i[e+11],i[e+12],i[e+13],i[e+14]],p=[i[e+15],i[e+16],i[e+17],i[e+18]];if(_<=0)return;let m=t.texFor(r);t.setRepeat(r,!0);let g=s[0],w=s[1],y=s[2],U=s[3],B=r.w*l,F=r.h*d,z=(g-n[0]+a)/B,j=(w-n[1]+o)/F,K=z+y/B,H=j+U/F;t.useSprite(m,_,f,p,2,1,u),t.rect(g,w,y,U,z,j,K,H),t.flush(),t.setRepeat(r,!1)}drawWindow(e,n,s,i){let t=this.a,r=this.r,a=this.bmp(t[e+4]),o=this.bmp(t[e+5]),l=t[e+6]+n,d=t[e+7]+s,_=t[e+8],u=t[e+9],f=t[e+10],p=t[e+11],m=t[e+12],g=t[e+13],w=t[e+14]/255,y=t[e+15]/255,U=t[e+16]/255,B=t[e+17],F=t[e+18],z=t[e+19],j=t[e+20],K=t[e+21],H=t[e+22]!==0,oe=t[e+23]!==0,ue=t[e+24]!==0,ne=[t[e+25],t[e+26],t[e+27],t[e+28]],$=t[e+29],X=t[e+30]!==0;if(_<=0||u<=0||B<=0)return;let W=Math.round(u*B/255),Y=d+Math.round((u-W)/2);if(a&&W>0){let b=r.texFor(a),E=a.w,N=a.h,x=(v,R,A,se,he,Se,Ke,Ve)=>{Ke<=0||Ve<=0||r.rect(he,Se,Ke,Ve,v/E,R/N,(v+A)/E,(R+se)/N)},I=l+2,C=Y+2,G=_-4,L=W-4;if(G>0&&L>0&&y*w>0){r.useSprite(b,y*w,null,ne),x(0,0,64,64,I,C,G,L),r.flush(),r.useSprite(b,y*w,null,ne);for(let v=0;v<L;v+=64){let R=Math.min(64,L-v);for(let A=0;A<G;A+=64){let se=Math.min(64,G-A);x(0,64,se,R,I+A,C+v,se,R)}}r.flush()}if(w>0){r.useSprite(b,w,null,null);let v=16,R=Math.min(v,Math.floor(W/2)),A=Math.min(v,Math.floor(_/2));x(64,0,A,R,l,Y,A,R),x(128-A,0,A,R,l+_-A,Y,A,R),x(64,64-R,A,R,l,Y+W-R,A,R),x(128-A,64-R,A,R,l+_-A,Y+W-R,A,R),x(64+v,0,32,R,l+A,Y,_-A*2,R),x(64+v,64-R,32,R,l+A,Y+W-R,_-A*2,R),x(64,v,A,32,l,Y+R,A,W-R*2),x(128-A,v,A,32,l+_-A,Y+R,A,W-R*2),r.flush()}}if(B<255)return;let te=[l+m,d+m,_-m*2,u-m-g],V=Wn(te,i);if(a&&j>0&&K>0&&V[2]>0&&V[3]>0){let b=r.texFor(a),E=a.w,N=a.h,x=1;if(H){let A=$%40;x=(255-(A<20?A:40-A)*6)/255}else x=.6;let I=l+m+F-(X?f:0),C=d+m+z-(X?p:0);r.scissor(V),r.useSprite(b,x*U,null,null);let G=4,L=(A,se,he,Se,Ke,Ve,Nn,In)=>{Nn<=0||In<=0||r.rect(Ke,Ve,Nn,In,A/E,se/N,(A+he)/E,(se+Se)/N)},v=Math.min(G,Math.floor(j/2)),R=Math.min(G,Math.floor(K/2));L(64,64,v,R,I,C,v,R),L(96-v,64,v,R,I+j-v,C,v,R),L(64,96-R,v,R,I,C+K-R,v,R),L(96-v,96-R,v,R,I+j-v,C+K-R,v,R),L(64+G,64,32-G*2,R,I+v,C,j-v*2,R),L(64+G,96-R,32-G*2,R,I+v,C+K-R,j-v*2,R),L(64,64+G,v,32-G*2,I,C+R,v,K-R*2),L(96-v,64+G,v,32-G*2,I+j-v,C+R,v,K-R*2),L(64+G,64+G,32-G*2,32-G*2,I+v,C+R,j-v*2,K-R*2),r.flush(),r.scissor(i)}if(o&&U>0&&V[2]>0&&V[3]>0){let b=r.texFor(o);r.scissor(V),r.useSprite(b,U,null,null),r.rect(l+m-f,d+m-p,o.w,o.h,0,0,1,1),r.flush(),r.scissor(i)}if(!a)return;let Q=r.texFor(a),pe=a.w,Ee=a.h,h=(b,E,N,x,I,C)=>r.rect(I,C,N,x,b/pe,E/Ee,(b+N)/pe,(E+x)/Ee);if(ue&&o){r.useSprite(Q,1,null,null);let b=_-m*2,E=u-m-g;p>0&&h(88,16,16,8,l+_/2-8,d+4),o.h-p>E&&h(88,40,16,8,l+_/2-8,d+u-12),f>0&&h(80,24,8,16,l+4,d+u/2-8),o.w-f>b&&h(104,24,8,16,l+_-12,d+u/2-8),r.flush()}if(oe){let b=Math.floor($/8)%4;r.useSprite(Q,1,null,null),h(96+b%2*16,64+Math.floor(b/2)*16,16,16,l+_/2-8,d+u-16),r.flush()}}drawTilemap(e,n,s,i,t,r){let a=this.a,o=this.r,l=this.tileCache.get(e);if(!l){let p=a[e+3],m=a[e+4],g=a[e+5],w=this.tables.get(a[e+15]),y=this.tables.get(a[e+16]);l=this.tiles.build(w,y?y.data:null,p+t[0]-s,m+t[1]-i,t[2],t[3],g),this.tileCache.set(e,l)}let d=[];for(let p=0;p<9;p++)d.push(this.bmp(a[e+6+p]));let _=t[0],u=t[1],f=p=>{for(let[m,g]of p){let w=d[m];if(!w)continue;let y=o.texFor(w),U=w.w,B=w.h;o.useSprite(y,1,null,null);for(let F=0;F<g.length;F+=8){let z=g[F+4],j=g[F+5],K=g[F+6],H=g[F+7];o.rect(_+g[F],u+g[F+1],g[F+2],g[F+3],z/U,j/B,(z+K)/U,(j+H)/B)}o.flush()}};if(n===0){f(l.lower[0]),f(l.lower[1]);let p=l.lower[2];if(p.length)for(let m=0;m<p.length;m+=3){let g=p[m+2];for(let w=0;w<4;w++)g&1<<w&&o.fillRect(_+p[m]+w%2*16,u+p[m+1]+Math.floor(w/2)*16,16,16,0,0,0,.5)}f(l.lower[3])}else f(l.upper)}};function Wn(c,e){let n=Math.max(c[0],e[0]),s=Math.max(c[1],e[1]),i=Math.min(c[0]+c[2],e[0]+e[2]),t=Math.min(c[1]+c[3],e[1]+e[3]);return[n,s,Math.max(0,i-n),Math.max(0,t-s)]}var S={DOWN:0,LEFT:1,RIGHT:2,UP:3,A:4,B:5,C:6,X:7,Y:8,Z:9,L:10,R:11,SHIFT:12,CTRL:13,ALT:14,F5:15,F6:16,F7:17,F8:18,F9:19},Yn=20,pt={ArrowDown:[S.DOWN],ArrowLeft:[S.LEFT],ArrowRight:[S.RIGHT],ArrowUp:[S.UP],Numpad2:[S.DOWN],Numpad4:[S.LEFT],Numpad6:[S.RIGHT],Numpad8:[S.UP],Space:[S.C],Enter:[S.C],NumpadEnter:[S.C],KeyZ:[S.C],Escape:[S.B],KeyX:[S.B],Numpad0:[S.B],Insert:[S.B],ShiftLeft:[S.A,S.SHIFT],ShiftRight:[S.A,S.SHIFT],KeyA:[S.X],KeyS:[S.Y],KeyD:[S.Z],KeyQ:[S.L],PageUp:[S.L],KeyW:[S.R],PageDown:[S.R],ControlLeft:[S.CTRL],ControlRight:[S.CTRL],AltLeft:[S.ALT],AltRight:[S.ALT],F5:[S.F5],F6:[S.F6],F7:[S.F7],F8:[S.F8],F9:[S.F9]},_n=class{constructor(){this.keyMask=0,this.nativeMask=0,this.prev=0,this.latched=0,this.counts=new Int32Array(Yn),this.dirOrder=[],this.onReset=null,this.onAnyKey=null,window.addEventListener("keydown",e=>this.key(e,!0)),window.addEventListener("keyup",e=>this.key(e,!1)),window.addEventListener("blur",()=>{this.keyMask=0})}key(e,n){if(e.code==="F12"&&n){this.onReset&&this.onReset(),e.preventDefault();return}let s=pt[e.code];if(s){e.preventDefault();for(let i of s)n?(this.keyMask|=1<<i,this.latched|=1<<i):this.keyMask&=~(1<<i);n&&this.onAnyKey&&this.onAnyKey()}}setNative(e){e|=0,this.latched|=e&~this.nativeMask,this.nativeMask=e,e&&this.onAnyKey&&this.onAnyKey()}current(){return this.keyMask|this.nativeMask}update(){let e=this.current()|this.latched&~this.prev;this.latched=0;let n=e&~this.prev,s=0;for(let u=0;u<Yn;u++)if(e&1<<u){let f=++this.counts[u];(f===1||f>=24&&(f-24)%6===0)&&(s|=1<<u)}else this.counts[u]=0;for(let[u,f]of[[S.DOWN,2],[S.LEFT,4],[S.RIGHT,6],[S.UP,8]]){let p=this.dirOrder.indexOf(f);e&1<<u?p<0&&this.dirOrder.push(f):p>=0&&this.dirOrder.splice(p,1)}let i=0,t=!!(e&1<<S.DOWN),r=!!(e&1<<S.UP),a=!!(e&1<<S.LEFT),o=!!(e&1<<S.RIGHT),l=t&&!r?2:r&&!t?8:0,d=a&&!o?4:o&&!a?6:0;for(let u=this.dirOrder.length-1;u>=0;u--){let f=this.dirOrder[u];if(f===l||f===d){i=f;break}}let _=0;return d&&l?_=l===2?d===4?1:3:d===4?7:9:_=d||l,this.prev=e,`${e},${n},${s},${i},${_}`}};var Z=c=>document.getElementById(c);function ht(c){let e=atob(c),n=new Uint8Array(e.length);for(let s=0;s<e.length;s++)n[s]=e.charCodeAt(s);return n}function mt(c){let e="";for(let s=0;s<c.length;s+=32768)e+=String.fromCharCode.apply(null,c.subarray(s,s+32768));return btoa(e)}var Sn={resolve:null,show(c,e,n){Z("ov-title").textContent=c,Z("ov-body").textContent=e,Z("ov-hint").textContent=n||"",Z("overlay").style.display="flex"},hide(){Z("overlay").style.display="none"},wait(c){return new Promise(e=>{let n=!1;setTimeout(()=>{n=!0},250);let s=()=>{n&&(Z("overlay").removeEventListener("pointerup",s),c.onAnyKey=null,this.hide(),e())};Z("overlay").addEventListener("pointerup",s),c.onAnyKey=s})}};function gt(c,e){let n=new Map,s=i=>{let t=n;for(let r of i){let a=t.get(r);a instanceof _e||(a=new _e(new Map),t.set(r,a)),t=a.contents}return t};for(let i of c){let t=i.split("/").filter(o=>o),r=t.pop();if(!r)continue;let a=s(t);a.has(r)||a.set(r,new ae(new Uint8Array(0)))}for(let[i,t]of Object.entries(e||{})){let r=i.split("/").filter(o=>o),a=r.pop();s(r).set(a,new ae(ht(t)))}return n}function An(c,e){let n=P.normalize(e).split("/").filter(i=>i&&i!=="."),s=c;for(let i=0;i<n.length;i++){let t=s.get(n[i]);if(!t)return null;if(i===n.length-1)return t;if(!(t instanceof _e))return null;s=t.contents}return null}window.addEventListener("error",c=>P.log("error","JS error: "+(c.message||c)+" @"+(c.filename||"")+":"+(c.lineno||"")));window.addEventListener("unhandledrejection",c=>P.log("error","Unhandled rejection: "+(c.reason&&c.reason.stack||c.reason)));async function wt(){let c=Z("loading");P.stage("page loaded (runtime b64643e 2026-11-17T15:37)");let e=await(await fetch(P.gameURL("__boot.json"))).json();P.stage(`boot info: engine=${e.engine} files=${(e.files||[]).length} preload=${Object.keys(e.preload||{}).length}`);let n=e.engine===2?2:3,s=e.settings||{};document.title=e.title||"TukuruPlayer";let i=Z("screen"),t=new on(i,544,416),r=new ln(P,t),a=new cn(t,r),o=new _n;i.addEventListener("webglcontextlost",()=>P.log("error","WebGL context lost (GPU process restarted?)")),i.addEventListener("webglcontextrestored",()=>P.log("error","WebGL context restored"));let l=()=>{let h=window.innerWidth,b=window.innerHeight,E=t.width,N=t.height,x=Math.min(h/E,b/N);s.scale==="integer"&&x>=1&&(x=Math.floor(x)),i.style.width=Math.floor(E*x)+"px",i.style.height=Math.floor(N*x)+"px";let I=b>h;Z("stage").style.alignItems=I&&s.portraitTop!==!1?"flex-start":"center",Z("stage").style.paddingTop=I?"env(safe-area-inset-top)":"0"};s.smooth||i.classList.add("pixelated"),window.addEventListener("resize",l),l(),s.showFPS&&(Z("fps").style.display="block");let d=(e.files||[]).filter(h=>/^fonts\/.+\.(ttf|otf|ttc)$/i.test(h));P.stage(`fonts: ${d.length}`),await Promise.all(d.map(h=>r.loadFont(h)));let _=!1,u=!1,f=null,p=performance.now(),m=60,g=0,w=performance.now(),y=h=>{if(requestAnimationFrame(y),!f||_)return;let b=1e3/m,E=h-p;if(E<b-1.5)return;p=E>b*3?h:p+b;let N=f;f=null,N(),g++,h-w>=1e3&&(Z("fps").textContent=g+" fps",g=0,w=h)};requestAnimationFrame(y),o.onReset=()=>{u=!0};let U=gt(e.files||[],e.preload||{}),B=new Map,F=new Set;for(let h of e.files||[])B.set(h.toLowerCase(),h),F.add(h);for(let h of Object.keys(e.preload||{}))B.set(h.toLowerCase(),h),F.delete(h);let z=async h=>{if(!F.has(h))return!0;let b=await fetch(P.gameURL(h));if(!b.ok)return!1;let E=new Uint8Array(await b.arrayBuffer()),N=h.split("/"),x=N.pop(),I=N.length?An(U,N.join("/")):null;return(I?I.contents:U).set(x,new ae(E)),F.delete(h),!0},j=/\.(png|jpe?g|bmp|gif|ogg|wav|mp3|m4a|mid|midi|wma|aac|ogv|mp4|avi|wmv|mpg|ttf|otf|ttc|rgss3a|rgss2a|rgssad|exe|dll|lnk|ico)$/i,K=[...F].filter(h=>!j.test(h)&&!/^(graphics|audio|movies|fonts|system)\//i.test(h));if(K.length){c.textContent=`\u30C7\u30FC\u30BF\u3092\u8AAD\u307F\u8FBC\u307F\u4E2D\u2026 (${K.length})`,P.stage(`preloading ${K.length} data files`);let h=0,b=async()=>{for(;h<K.length;){let E=K[h++];try{await z(E)}catch(N){P.log("error",`preload failed: ${E}: ${N}`)}}};await Promise.all(Array.from({length:6},b))}let H=new Map,oe=Ge.lineBuffered(h=>P.log("info",h)),ue=Ge.lineBuffered(h=>P.log("error",h)),ne=new xn([],["RUBYOPT=","HOME=/game"],[new Pe(new ae([])),oe,ue,new Ue("/game",U),new Ue("/tkrtmp",H)],{debug:!1});c.textContent="Ruby \u3092\u8D77\u52D5\u4E2D\u2026",P.stage("compiling ruby.wasm");let $;try{$=await WebAssembly.compileStreaming(fetch("ruby.wasm"))}catch{let b=await(await fetch("ruby.wasm")).arrayBuffer();$=await WebAssembly.compile(b)}let{vm:X,instance:W}=await $e.instantiateModule({module:$,wasip1:ne,args:["ruby.wasm","--disable-gems","-W0","-EUTF-8","-e_=0"]});P.stage("ruby vm ready");let Y=W?W.exports.memory:null,te=()=>{try{return Y?Math.round(Y.buffer.byteLength/1048576):-1}catch{return-1}},V=0,Q=(h,...b)=>P.post({type:"audio",op:h,args:b}),pe=0,Ee=null;window.TKR={engine:n,title:e.title||"",bmpCreate:(h,b)=>r.create(h,b),bmpLoad:h=>r.load(h),bmpW:h=>r.width(h),bmpH:h=>r.height(h),bmpDispose:h=>r.dispose(h),bmpDup:h=>r.dup(h),bmpBlt:(h,b,E,N,x,I,C,G,L)=>r.blt(h,b,E,N,x,I,C,G,L),bmpStretch:(h,b,E,N,x,I,C,G,L,v,R)=>r.stretchBlt(h,b,E,N,x,I,C,G,L,v,R),bmpFill:(h,b,E,N,x,I,C,G,L)=>r.fill(h,b,E,N,x,I,C,G,L),bmpGrad:(h,b,E,N,x,I,C,G,L,v,R,A,se,he)=>r.gradient(h,b,E,N,x,I,C,G,L,v,R,A,se,he),bmpClear:h=>r.clear(h),bmpClearRect:(h,b,E,N,x)=>r.clearRect(h,b,E,N,x),bmpGetPixel:(h,b,E)=>r.getPixel(h,b,E),bmpSetPixel:(h,b,E,N,x,I,C)=>r.setPixel(h,b,E,N,x,I,C),bmpHue:(h,b)=>r.hueChange(h,b),bmpBlur:h=>r.blur(h),bmpRadialBlur:(h,b,E)=>r.radialBlur(h,b,E),bmpDrawText:(h,b,E,N,x,I,C,G)=>r.drawText(h,b,E,N,x,I,C,G),textSize:(h,b)=>r.textSize(h,b),bitmapMB:()=>r.memoryMB(),bitmapCount:()=>r.map.size,fontExists:h=>r.fontExists(h)?1:0,tableUpload:(h,b,E,N,x)=>a.uploadTable(h,b,E,N,x),tableFree:h=>a.freeTable(h),render:h=>{window.TKR.lastList=h,a.render(h),t.present(),V++,(V===1||V%120===0)&&P.stage(`frame ${V}: wasm ${te()}MB, bitmaps ${r.map.size} (${r.memoryMB()}MB), ${t.width}x${t.height}`)},frame:()=>new Promise(h=>{if(u){u=!1,h("reset");return}f=()=>{if(u){u=!1,h("reset");return}h("")}}),setFrameRate:h=>{m=Math.max(10,Math.min(120,h))},freeze:h=>{a.render(h),t.freeze()},unfreeze:()=>{t.frozen=!1,t.transition=null},transitionStep:(h,b,E,N)=>{let x=null;if(E){let I=r.map.get(E);I&&(x=t.texFor(I))}t.transition={prog:b,maskTex:x,vague:N/255},a.render(h),t.present()},snap:h=>{a.render(h);let b=t.snapshotPixels();return r.fromPixels(t.width,t.height,b)},resize:(h,b)=>{h===t.width&&b===t.height||(t.resize(h,b),l(),P.stage(`resize_screen ${h}x${b}`),P.post({type:"resolution",w:h,h:b}))},inputUpdate:()=>o.update(),audio:Q,bgmPos:()=>pe,loadData:async h=>{let b=await fetch(P.gameURL(h));if(!b.ok)throw new Error("Unable to find file: "+h);let E=new Uint8Array(await b.arrayBuffer());return H.set("load.bin",new ae(E)),"/tkrtmp/load.bin"},syncFile:h=>{let b=An(U,h);return!b||!(b instanceof ae)?!1:(P.post({type:"save",path:P.normalize(h),data:mt(b.data)}),!0)},deleteFile:h=>{P.post({type:"delete",path:P.normalize(h)})},fsResolve:h=>{let b=P.normalize(h);return An(U,b)?b:B.get(b.toLowerCase())||""},isPlaceholder:h=>F.has(h)?1:0,materialize:h=>z(h),log:h=>P.log("info",h),msgbox:async h=>{Sn.show(e.title||"",h,"\u30BF\u30C3\u30D7 / \u30DC\u30BF\u30F3\u3067\u9589\u3058\u308B"),await Sn.wait(o)},exit:()=>P.post({type:"exit"}),error:(h,b)=>{P.log("error",h+`
 `+b),Sn.show(h,b,""),P.post({type:"error",title:h,text:b})},ready:()=>{c.style.display="none",P.post({type:"ready"})},stage:h=>P.stage(h)},window.TKRNative={input:h=>o.setNative(h),bgmPos:h=>{pe=h},pause:h=>{_=!!h,h||(p=performance.now())},reset:()=>{u=!0},settings:h=>{Object.assign(s,h),i.classList.toggle("pixelated",!s.smooth),Z("fps").style.display=s.showFPS?"block":"none",l()}},c.textContent="\u30B2\u30FC\u30E0\u3092\u8AAD\u307F\u8FBC\u307F\u4E2D\u2026",P.stage("loading RGSS runtime"),X.eval(`$TKR_ENGINE = ${n}`);for(let h of Object.keys(vn).sort())if(!(n===3&&h.startsWith("rpg2"))&&!(n===2&&h.startsWith("rpg3")))try{X.eval(vn[h])}catch(b){window.TKR.error("Runtime load error: "+h,String(b.message||b));return}P.stage(`runtime loaded (wasm ${te()}MB)`);try{await X.evalAsync("TKRBoot.run")}catch(h){window.TKR.error("Fatal error",String(h.message||h))}}wt().catch(c=>{console.error(c);let e=document.getElementById("overlay");document.getElementById("ov-title").textContent="\u8D77\u52D5\u30A8\u30E9\u30FC",document.getElementById("ov-body").textContent=String(c&&c.stack||c),e.style.display="flex",P.post({type:"error",title:"\u8D77\u52D5\u30A8\u30E9\u30FC",text:String(c)})});})();

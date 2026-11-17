@@ -1,8 +1,9 @@
 # Bitmap: pixel data lives in JS (canvas / ImageBitmap), referenced by id.
 
 class Bitmap
-  attr_reader :width, :height, :__id
-  attr_accessor :font
+  tkr_reader :width, :height
+  attr_reader :__id
+  tkr_accessor :font
 
   def initialize(*args)
     if args.size == 1
@@ -12,20 +13,20 @@ class Bitmap
       rescue JS::Error, StandardError => e
         raise Errno::ENOENT, path
       end
-      @width = TKRCore.int(:bmpW, @__id)
-      @height = TKRCore.int(:bmpH, @__id)
+      @__width = TKRCore.int(:bmpW, @__id)
+      @__height = TKRCore.int(:bmpH, @__id)
     elsif args.size == 2
       w = args[0].to_i
       h = args[1].to_i
       raise RGSSError, 'failed to create bitmap' if w <= 0 || h <= 0
-      @width = w
-      @height = h
+      @__width = w
+      @__height = h
       @__id = TKRCore.int(:bmpCreate, w, h)
     else
       raise ArgumentError, "wrong number of arguments (#{args.size} for 1..2)"
     end
-    @font = Font.new
-    @disposed = false
+    @__font = Font.new
+    @__disposed = false
     ObjectSpace.define_finalizer(self, Bitmap.__finalizer(@__id))
   end
 
@@ -38,10 +39,10 @@ class Bitmap
 
   def __init_wrap(id)
     @__id = id
-    @width = TKRCore.int(:bmpW, id)
-    @height = TKRCore.int(:bmpH, id)
-    @font = Font.new
-    @disposed = false
+    @__width = TKRCore.int(:bmpW, id)
+    @__height = TKRCore.int(:bmpH, id)
+    @__font = Font.new
+    @__disposed = false
     ObjectSpace.define_finalizer(self, Bitmap.__finalizer(id))
   end
 
@@ -51,28 +52,32 @@ class Bitmap
 
   def initialize_copy(o)
     super
+    # dup/clone also copies finalizers: drop the copied one, otherwise collecting the copy
+    # would dispose the ORIGINAL bitmap (e.g. Cache.system("Iconset").dup in battle scripts)
+    ObjectSpace.undefine_finalizer(self)
+    raise RGSSError, 'disposed bitmap' if o.disposed?
     @__id = TKRCore.int(:bmpDup, o.__id)
-    @font = o.font.dup
-    @disposed = false
+    @__font = o.font.dup
+    @__disposed = false
     ObjectSpace.define_finalizer(self, Bitmap.__finalizer(@__id))
   end
 
   def dispose
-    return if @disposed
+    return if @__disposed
     TKRCore.call(:bmpDispose, @__id)
-    @disposed = true
+    @__disposed = true
   end
 
   def disposed?
-    @disposed
+    @__disposed
   end
 
   def rect
-    Rect.new(0, 0, @width, @height)
+    Rect.new(0, 0, @__width, @__height)
   end
 
   def check_disposed
-    raise RGSSError, 'disposed bitmap' if @disposed
+    raise RGSSError, 'disposed bitmap' if @__disposed
   end
   private :check_disposed
 
@@ -181,14 +186,14 @@ class Bitmap
     s = str.to_s
     return self if s.empty?
     s = s.dup.force_encoding('UTF-8') unless s.encoding == Encoding::UTF_8
-    TKRCore.call(:bmpDrawText, @__id, x.to_i, y.to_i, w.to_i, h.to_i, s.scrub('?'), align.to_i, @font.__spec)
+    TKRCore.call(:bmpDrawText, @__id, x.to_i, y.to_i, w.to_i, h.to_i, s.scrub('?'), align.to_i, @__font.__spec)
     self
   end
 
   def text_size(str)
     s = str.to_s
     s = s.dup.force_encoding('UTF-8') unless s.encoding == Encoding::UTF_8
-    w = s.empty? ? 0 : TKRCore.int(:textSize, @font.__spec, s.scrub('?'))
-    Rect.new(0, 0, w, @font.size.to_i)
+    w = s.empty? ? 0 : TKRCore.int(:textSize, @__font.__spec, s.scrub('?'))
+    Rect.new(0, 0, w, @__font.size.to_i)
   end
 end

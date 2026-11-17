@@ -1,6 +1,26 @@
 # Core RGSS classes: Color, Tone, Rect, Table, Font, errors and the JS bridge.
 
 class RGSSError < StandardError; end
+
+# Accessors for built-in RGSS classes keep their state in @__name instance variables, so
+# that game scripts subclassing Sprite/Window/Plane... can freely use @x, @opacity, etc.
+# (in real RGSS these classes are implemented in C and have no Ruby-visible state).
+class Module
+  private
+
+  def tkr_reader(*names)
+    names.each { |n| class_eval("def #{n}; @__#{n}; end", __FILE__, __LINE__) }
+  end
+
+  def tkr_writer(*names)
+    names.each { |n| class_eval("def #{n}=(v); @__#{n} = v; end", __FILE__, __LINE__) }
+  end
+
+  def tkr_accessor(*names)
+    tkr_reader(*names)
+    tkr_writer(*names)
+  end
+end
 class RGSSReset < Exception; end
 
 module TKRCore
@@ -291,6 +311,16 @@ class Table
 
   def __data
     @data
+  end
+
+  # dup/clone: independent data, no shared JS upload id, no copied finalizer
+  # (the copied finalizer would free the original's tilemap data in JS).
+  def initialize_copy(o)
+    super
+    ObjectSpace.undefine_finalizer(self)
+    @data = o.__data.dup
+    @__js_id = nil
+    @__js_version = nil
   end
 
   def _dump(_depth = 0)

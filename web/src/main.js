@@ -269,6 +269,7 @@ async function main() {
     tableFree: (id) => scene.freeTable(id),
     // graphics
     render: (list) => {
+      window.TKR.lastList = list; // for debugging
       scene.render(list);
       renderer.present();
       frameNo++;

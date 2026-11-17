@@ -24,6 +24,10 @@ module TKRBoot
 
     def show_error(e)
       bt = (e.backtrace || []).reject { |l| l.include?('/rgss/') || l.include?('<internal:') }
+      if e.is_a?(TKRUnsupportedGame)
+        TKRCore.call(:error, 'このゲームには対応していません', e.message)
+        return
+      end
       title = e.is_a?(SyntaxError) ? 'Script syntax error' : "#{e.class}"
       body = "#{e.message}\n\n#{bt.first(12).join("\n")}"
       TKRCore.call(:error, title, body)

@@ -148,6 +148,22 @@ def run_unit_tests
   buf = "\0" * 256
   Win32API.new('kernel32', 'GetPrivateProfileString', 'pppplp', 'l').call('Game', 'Title', '', buf, 255, '.\\Game.ini')
   TestLog.check('ini read', buf.delete("\0") == 'テストゲーム')
+  # dup must not share finalizers / data with the original
+  orig = Bitmap.new(8, 8)
+  3.times { orig.dup }
+  GC.start
+  Graphics.update
+  ok = begin
+    orig.fill_rect(0, 0, 8, 8, Color.new(1, 2, 3)); orig.dup.width == 8
+  rescue StandardError
+    false
+  end
+  TestLog.check('Bitmap#dup keeps the original alive', ok)
+  tt = Table.new(3)
+  tt[0] = 5
+  tu = tt.dup
+  tu[0] = 9
+  TestLog.check('Table#dup is independent', tt[0] == 5 && tu[0] == 9)
   # custom data loaders use IO.binread / File.size / Zlib on raw files
   raw = IO.binread('Data/Custom.bin')
   TestLog.check('custom data via IO.binread', File.size('Data/Custom.bin') == raw.bytesize &&

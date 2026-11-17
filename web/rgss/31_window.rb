@@ -1,94 +1,93 @@
 # Window (RGSS2 / RGSS3 compatible) and Tilemap (VX / VX Ace).
 
 class Window
-  attr_reader :viewport, :windowskin, :contents, :cursor_rect, :tone, :__uid
-  attr_reader :x, :y, :width, :height, :openness, :opacity, :back_opacity, :contents_opacity
-  attr_accessor :active, :visible, :arrows_visible, :pause, :z, :ox, :oy,
-                :padding, :padding_bottom
-
+  tkr_reader :viewport, :windowskin, :contents, :cursor_rect, :tone
+  attr_reader :__uid
+  tkr_reader :x, :y, :width, :height, :openness, :opacity, :back_opacity, :contents_opacity
+  tkr_accessor :active, :visible, :arrows_visible, :pause, :z, :ox, :oy, :padding, :padding_bottom
   def initialize(*args)
     if args.size >= 4
-      @x, @y, @width, @height = args[0, 4].map(&:to_i)
-      @viewport = nil
+      @__x, @__y, @__width, @__height = args[0, 4].map(&:to_i)
+      @__viewport = nil
     else
-      @viewport = args[0]
-      @x = @y = @width = @height = 0
+      @__viewport = args[0]
+      @__x = @__y = @__width = @__height = 0
     end
-    @windowskin = nil
-    @contents = TKRCore::RGSS == 3 ? Bitmap.new(1, 1) : nil
-    @cursor_rect = Rect.new(0, 0, 0, 0)
-    @active = true
-    @visible = true
-    @arrows_visible = true
-    @pause = false
-    @z = TKRCore::RGSS == 3 ? 100 : 0
-    @ox = @oy = 0
-    @padding = 12
-    @padding = 16 if TKRCore::RGSS == 2
-    @padding_bottom = @padding
-    @opacity = 255
-    @back_opacity = TKRCore::RGSS == 3 ? 192 : 200
-    @contents_opacity = 255
-    @openness = 255
-    @tone = Tone.new(0, 0, 0, 0)
-    @anim = 0
-    @disposed = false
+    @__windowskin = nil
+    @__contents = TKRCore::RGSS == 3 ? Bitmap.new(1, 1) : nil
+    @__cursor_rect = Rect.new(0, 0, 0, 0)
+    @__active = true
+    @__visible = true
+    @__arrows_visible = true
+    @__pause = false
+    @__z = TKRCore::RGSS == 3 ? 100 : 0
+    @__ox = @__oy = 0
+    @__padding = 12
+    @__padding = 16 if TKRCore::RGSS == 2
+    @__padding_bottom = @__padding
+    @__opacity = 255
+    @__back_opacity = TKRCore::RGSS == 3 ? 192 : 200
+    @__contents_opacity = 255
+    @__openness = 255
+    @__tone = Tone.new(0, 0, 0, 0)
+    @__anim = 0
+    @__disposed = false
     @__uid = TKRCore.register(self)
   end
 
-  def viewport=(v); @viewport = v; end
-  def windowskin=(b); @windowskin = b; end
-  def contents=(b); @contents = b; end
-  def cursor_rect=(r); @cursor_rect.set(r); end
-  def tone=(t); @tone.set(t); end
-  def x=(v); @x = v.to_i; end
-  def y=(v); @y = v.to_i; end
-  def width=(v); @width = v.to_i; end
-  def height=(v); @height = v.to_i; end
+  def viewport=(v); @__viewport = v; end
+  def windowskin=(b); @__windowskin = b; end
+  def contents=(b); @__contents = b; end
+  def cursor_rect=(r); @__cursor_rect.set(r); end
+  def tone=(t); @__tone.set(t); end
+  def x=(v); @__x = v.to_i; end
+  def y=(v); @__y = v.to_i; end
+  def width=(v); @__width = v.to_i; end
+  def height=(v); @__height = v.to_i; end
 
   def padding=(v)
-    @padding = v.to_i
-    @padding_bottom = @padding
+    @__padding = v.to_i
+    @__padding_bottom = @__padding
   end
 
-  def opacity=(v); @opacity = clamp255(v); end
-  def back_opacity=(v); @back_opacity = clamp255(v); end
-  def contents_opacity=(v); @contents_opacity = clamp255(v); end
-  def openness=(v); @openness = clamp255(v); end
+  def opacity=(v); @__opacity = clamp255(v); end
+  def back_opacity=(v); @__back_opacity = clamp255(v); end
+  def contents_opacity=(v); @__contents_opacity = clamp255(v); end
+  def openness=(v); @__openness = clamp255(v); end
 
   def move(x, y, w, h)
-    @x = x.to_i; @y = y.to_i; @width = w.to_i; @height = h.to_i
+    @__x = x.to_i; @__y = y.to_i; @__width = w.to_i; @__height = h.to_i
   end
 
-  def open?; @openness == 255; end
-  def close?; @openness == 0; end
+  def open?; @__openness == 255; end
+  def close?; @__openness == 0; end
 
   def update
-    @anim += 1
+    @__anim += 1
   end
 
   def dispose
-    return if @disposed
-    @disposed = true
+    return if @__disposed
+    @__disposed = true
     TKRCore.unregister(@__uid)
   end
 
-  def disposed?; @disposed; end
+  def disposed?; @__disposed; end
 
   def __pack(a)
-    return if @disposed || !@visible || @openness <= 0
-    vp = @viewport
+    return if @__disposed || !@__visible || @__openness <= 0
+    vp = @__viewport
     if vp
       return if vp.disposed? || !vp.visible
     end
-    skin = @windowskin && !@windowskin.disposed? ? @windowskin.__id : 0
-    cont = @contents && !@contents.disposed? ? @contents.__id : 0
-    c = @cursor_rect
-    t = @tone
-    a.push(3, @__uid, vp ? vp.__uid : 0, @z.to_i, skin, cont, @x, @y, @width, @height,
-           @ox.to_i, @oy.to_i, @padding, @padding_bottom, @opacity, @back_opacity, @contents_opacity,
-           @openness, c.x, c.y, c.width, c.height, @active ? 1 : 0, @pause ? 1 : 0,
-           @arrows_visible ? 1 : 0, t.red, t.green, t.blue, t.gray, @anim,
+    skin = @__windowskin && !@__windowskin.disposed? ? @__windowskin.__id : 0
+    cont = @__contents && !@__contents.disposed? ? @__contents.__id : 0
+    c = @__cursor_rect
+    t = @__tone
+    a.push(3, @__uid, vp ? vp.__uid : 0, @__z.to_i, skin, cont, @__x, @__y, @__width, @__height,
+           @__ox.to_i, @__oy.to_i, @__padding, @__padding_bottom, @__opacity, @__back_opacity, @__contents_opacity,
+           @__openness, c.x, c.y, c.width, c.height, @__active ? 1 : 0, @__pause ? 1 : 0,
+           @__arrows_visible ? 1 : 0, t.red, t.green, t.blue, t.gray, @__anim,
            TKRCore::RGSS == 3 ? 1 : 0)
   end
 
@@ -102,28 +101,28 @@ end
 
 class Tilemap
   class BitmapArray
-    def initialize; @a = Array.new(9); end
-    def [](i); @a[i]; end
-    def []=(i, b); @a[i] = b; end
+    def initialize; @__a = Array.new(9); end
+    def [](i); @__a[i]; end
+    def []=(i, b); @__a[i] = b; end
     def ids
-      @a.map { |b| b && !b.disposed? ? b.__id : 0 }
+      @__a.map { |b| b && !b.disposed? ? b.__id : 0 }
     end
   end
-
-  attr_reader :viewport, :bitmaps, :__uid
-  attr_accessor :map_data, :flash_data, :flags, :visible, :ox, :oy
+  tkr_reader :viewport, :bitmaps
+  attr_reader :__uid
+  tkr_accessor :map_data, :flash_data, :flags, :visible, :ox, :oy
 
   def initialize(viewport = nil)
-    @viewport = viewport
-    @bitmaps = BitmapArray.new
-    @map_data = nil
-    @flash_data = nil
-    @flags = nil
-    @visible = true
-    @ox = 0
-    @oy = 0
-    @anim = 0
-    @disposed = false
+    @__viewport = viewport
+    @__bitmaps = BitmapArray.new
+    @__map_data = nil
+    @__flash_data = nil
+    @__flags = nil
+    @__visible = true
+    @__ox = 0
+    @__oy = 0
+    @__anim = 0
+    @__disposed = false
     @__uid = TKRCore.register(self)
   end
 
@@ -131,30 +130,30 @@ class Tilemap
   alias passages flags
   alias passages= flags=
 
-  def viewport=(v); @viewport = v; end
+  def viewport=(v); @__viewport = v; end
 
   def update
-    @anim += 1
+    @__anim += 1
   end
 
   def dispose
-    return if @disposed
-    @disposed = true
+    return if @__disposed
+    @__disposed = true
     TKRCore.unregister(@__uid)
   end
 
-  def disposed?; @disposed; end
+  def disposed?; @__disposed; end
 
   def __pack(a)
-    return if @disposed || !@visible || @map_data.nil?
-    vp = @viewport
+    return if @__disposed || !@__visible || @__map_data.nil?
+    vp = @__viewport
     if vp
       return if vp.disposed? || !vp.visible
     end
-    map_id = @map_data.__sync_js
-    flags_id = @flags ? @flags.__sync_js : 0
-    a.push(4, @__uid, vp ? vp.__uid : 0, @ox.to_i, @oy.to_i, @anim)
-    a.concat(@bitmaps.ids)
+    map_id = @__map_data.__sync_js
+    flags_id = @__flags ? @__flags.__sync_js : 0
+    a.push(4, @__uid, vp ? vp.__uid : 0, @__ox.to_i, @__oy.to_i, @__anim)
+    a.concat(@__bitmaps.ids)
     a.push(map_id, flags_id)
   end
 end
