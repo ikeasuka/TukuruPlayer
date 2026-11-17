@@ -114,7 +114,12 @@ struct MIDIFileInfo {
         data = input
         loopSeconds = nil
         guard bytes.count > 14, bytes[0] == 0x4D, bytes[1] == 0x54, bytes[2] == 0x68, bytes[3] == 0x64 else { return }
-        func be32(_ i: Int) -> Int { Int(bytes[i]) << 24 | Int(bytes[i + 1]) << 16 | Int(bytes[i + 2]) << 8 | Int(bytes[i + 3]) }
+        func be32(_ i: Int) -> Int {
+            let a: Int = Int(bytes[i]) << 24
+            let b: Int = Int(bytes[i + 1]) << 16
+            let c: Int = Int(bytes[i + 2]) << 8
+            return a | b | c | Int(bytes[i + 3])
+        }
         func be16(_ i: Int) -> Int { Int(bytes[i]) << 8 | Int(bytes[i + 1]) }
         let headerLen = be32(4)
         let ntrks = be16(10)
@@ -150,7 +155,9 @@ struct MIDIFileInfo {
                         if c & 0x80 == 0 { break }
                     }
                     if type == 0x51 && l == 3 && i + 2 < end {
-                        tempos.append((tick, Int(bytes[i]) << 16 | Int(bytes[i + 1]) << 8 | Int(bytes[i + 2])))
+                        let t0: Int = Int(bytes[i]) << 16
+                        let t1: Int = Int(bytes[i + 1]) << 8
+                        tempos.append((tick: tick, us: t0 | t1 | Int(bytes[i + 2])))
                     }
                     i += l
                     status = 0

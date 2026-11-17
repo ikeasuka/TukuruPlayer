@@ -40,7 +40,11 @@ final class RGSSArchive {
 
     private static func u32(_ d: Data, _ i: Int) -> UInt32 {
         let b = d.startIndex + i
-        return UInt32(d[b]) | UInt32(d[b + 1]) << 8 | UInt32(d[b + 2]) << 16 | UInt32(d[b + 3]) << 24
+        let b0 = UInt32(d[b])
+        let b1 = UInt32(d[b + 1]) << 8
+        let b2 = UInt32(d[b + 2]) << 16
+        let b3 = UInt32(d[b + 3]) << 24
+        return b0 | b1 | b2 | b3
     }
 
     private static func decodeName(_ bytes: [UInt8]) -> String {
@@ -103,8 +107,11 @@ final class RGSSArchive {
             let n = raw.count
             var i = 0
             while i + 4 <= n {
-                var v = UInt32(p[i]) | UInt32(p[i + 1]) << 8 | UInt32(p[i + 2]) << 16 | UInt32(p[i + 3]) << 24
-                v ^= key
+                let w0 = UInt32(p[i])
+                let w1 = UInt32(p[i + 1]) << 8
+                let w2 = UInt32(p[i + 2]) << 16
+                let w3 = UInt32(p[i + 3]) << 24
+                let v = (w0 | w1 | w2 | w3) ^ key
                 p[i] = UInt8(v & 0xFF); p[i + 1] = UInt8((v >> 8) & 0xFF)
                 p[i + 2] = UInt8((v >> 16) & 0xFF); p[i + 3] = UInt8(v >> 24)
                 key = key &* 7 &+ 3

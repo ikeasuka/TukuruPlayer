@@ -42,12 +42,14 @@ final class VirtualPadView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        let s = padScale * min(1.25, max(0.8, min(bounds.width, bounds.height) / 390))
+        let shortSide: CGFloat = min(bounds.width, bounds.height)
+        let s: CGFloat = padScale * min(1.25, max(0.8, shortSide / 390))
         let inset = safeAreaInsets
-        let bottom = bounds.height - max(inset.bottom, 12) - 24 * s
+        let bottom: CGFloat = bounds.height - max(inset.bottom, 12) - 24 * s
         dpadRadius = 66 * s
         dpadCenter = CGPoint(x: max(inset.left, 12) + 24 * s + dpadRadius, y: bottom - dpadRadius)
-        let bc = CGPoint(x: bounds.width - max(inset.right, 12) - 24 * s - 70 * s, y: bottom - 70 * s)
+        let bcx: CGFloat = bounds.width - max(inset.right, 12) - 94 * s
+        let bc = CGPoint(x: bcx, y: bottom - 70 * s)
         let off = 50 * s
         let r = 29 * s
         func place(_ i: Int, _ p: CGPoint, _ rad: CGFloat) { keys[i].center = p; keys[i].radius = rad }
@@ -127,8 +129,11 @@ final class VirtualPadView: UIView {
             let p = t.location(in: self)
             let dx = p.x - dpadCenter.x, dy = p.y - dpadCenter.y
             if hypot(dx, dy) > dpadRadius * 0.22 {
-                let ang = atan2(-dy, dx) // radians, 0 = right, counter-clockwise
-                let sector = Int(((ang + .pi * 2).truncatingRemainder(dividingBy: .pi * 2) + .pi / 8) / (.pi / 4)) % 8
+                let twoPi: CGFloat = CGFloat.pi * 2
+                let ang: CGFloat = atan2(-dy, dx) // radians, 0 = right, counter-clockwise
+                let norm: CGFloat = (ang + twoPi).truncatingRemainder(dividingBy: twoPi)
+                let shifted: CGFloat = (norm + CGFloat.pi / 8) / (CGFloat.pi / 4)
+                let sector = Int(shifted) % 8
                 switch sector {
                 case 0: d = RGSSButton.right.bit
                 case 1: d = RGSSButton.right.bit | RGSSButton.up.bit
@@ -175,10 +180,17 @@ final class VirtualPadView: UIView {
         for (b, dx, dy) in dirs {
             let on = dpadMask & b.bit != 0
             let c = CGPoint(x: dpadCenter.x + dx * arm, y: dpadCenter.y + dy * arm)
+            let fwd: CGFloat = w * 0.6
+            let back: CGFloat = w * 0.4
+            let tip = CGPoint(x: c.x + dx * fwd, y: c.y + dy * fwd)
+            let bx: CGFloat = c.x - dx * back
+            let by: CGFloat = c.y - dy * back
+            let p1 = CGPoint(x: bx + dy * fwd, y: by + dx * fwd)
+            let p2 = CGPoint(x: bx - dy * fwd, y: by - dx * fwd)
             let tri = UIBezierPath()
-            tri.move(to: CGPoint(x: c.x + dx * w * 0.6, y: c.y + dy * w * 0.6))
-            tri.addLine(to: CGPoint(x: c.x - dx * w * 0.4 + dy * w * 0.6, y: c.y - dy * w * 0.4 + dx * w * 0.6))
-            tri.addLine(to: CGPoint(x: c.x - dx * w * 0.4 - dy * w * 0.6, y: c.y - dy * w * 0.4 - dx * w * 0.6))
+            tri.move(to: tip)
+            tri.addLine(to: p1)
+            tri.addLine(to: p2)
             tri.close()
             (on ? UIColor.white : edge).setFill()
             tri.fill()

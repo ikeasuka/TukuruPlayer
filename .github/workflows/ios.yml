@@ -41,6 +41,7 @@ jobs:
   ios:
     name: iOS app
     runs-on: macos-15
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -52,14 +53,16 @@ jobs:
         run: xcodegen generate
       - name: Build (simulator)
         run: |
-          xcodebuild -project TukuruPlayer.xcodeproj -scheme TukuruPlayer \
+          perl -e 'alarm 1200; exec @ARGV' xcodebuild -project TukuruPlayer.xcodeproj -scheme TukuruPlayer \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-            -configuration Debug CODE_SIGNING_ALLOWED=NO build > build.log 2>&1 \
-            || { grep -E "error:" -A4 build.log | head -n 150; tail -n 20 build.log; exit 1; }
+            -configuration Debug CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES ARCHS=arm64 \
+            OTHER_SWIFT_FLAGS='$(inherited) -Xfrontend -warn-long-expression-type-checking=200 -Xfrontend -warn-long-function-bodies=500' \
+            build > build.log 2>&1 \
+            || { grep -E "error:|type-check" -A4 build.log | head -n 150; tail -n 30 build.log; exit 1; }
           grep -E "warning:" build.log | grep "ios/TukuruPlayer" | sort -u | head -n 60 || true
       - name: Build unsigned IPA (device)
         run: |
-          xcodebuild -project TukuruPlayer.xcodeproj -scheme TukuruPlayer \
+          perl -e 'alarm 1500; exec @ARGV' xcodebuild -project TukuruPlayer.xcodeproj -scheme TukuruPlayer \
             -sdk iphoneos -destination 'generic/platform=iOS' -configuration Release \
             -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build > release.log 2>&1 \
             || { grep -E "error:" -A4 release.log | head -n 150; tail -n 20 release.log; exit 1; }
