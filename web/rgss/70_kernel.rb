@@ -205,6 +205,12 @@ end
 
 module Kernel
   def load_data(filename)
+    # Files the game wrote (saves etc.) live in the in-memory filesystem; the copy on the
+    # host may not have been written yet, so read those directly.
+    local = TKRCore.resolve_ci(filename.to_s)
+    if File.__tkr_exist(local) && TKRCore.int(:isPlaceholder, TKRCore.game_relative(local).to_s) == 0
+      return TKRCore.marshal_load(File.__tkr_binread(local))
+    end
     path = begin
       TKRCore.call(:loadData, filename.to_s).await.to_s
     rescue StandardError
