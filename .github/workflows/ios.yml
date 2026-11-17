@@ -70,11 +70,25 @@ jobs:
             build > build.log 2>&1 \
             || { grep -E "error:|type-check" -A4 build.log | head -n 150; tail -n 30 build.log; exit 1; }
           grep -E "warning:" build.log | grep "ios/TukuruPlayer" | sort -u | head -n 60 || true
+      - name: Build unsigned IPA (device)
+        run: |
+          perl -e 'alarm 1500; exec @ARGV' xcodebuild -project TukuruPlayer.xcodeproj -scheme TukuruPlayer \
+            -sdk iphoneos -destination 'generic/platform=iOS' -configuration Release \
+            -derivedDataPath build CURRENT_PROJECT_VERSION=${{ github.run_number }} CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build > release.log 2>&1 \
+            || { grep -E "error:" -A4 release.log | head -n 150; tail -n 20 release.log; exit 1; }
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/TukuruPlayer.app Payload/
+          zip -qr TukuruPlayer-unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TukuruPlayer-unsigned-ipa
+          path: TukuruPlayer-unsigned.ipa
       - name: Run the test game in the app on an iOS Simulator
+        timeout-minutes: 12
+        continue-on-error: true
         run: |
           set -x
           pip3 install --break-system-packages pillow >/dev/null 2>&1 || pip3 install pillow >/dev/null 2>&1 || true
-          brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg >/dev/null 2>&1 || true
           python3 web/dev/make_testgame.py
           UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print([x['udid'] for k,v in d.items() if 'iOS' in k for x in v if x['name'].startswith('iPhone')][-1])")
           xcrun simctl boot "$UDID"
@@ -102,16 +116,3 @@ jobs:
         with:
           name: simulator-results
           path: sim-results
-      - name: Build unsigned IPA (device)
-        run: |
-          perl -e 'alarm 1500; exec @ARGV' xcodebuild -project TukuruPlayer.xcodeproj -scheme TukuruPlayer \
-            -sdk iphoneos -destination 'generic/platform=iOS' -configuration Release \
-            -derivedDataPath build CURRENT_PROJECT_VERSION=${{ github.run_number }} CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build > release.log 2>&1 \
-            || { grep -E "error:" -A4 release.log | head -n 150; tail -n 20 release.log; exit 1; }
-          mkdir -p Payload
-          cp -R build/Build/Products/Release-iphoneos/TukuruPlayer.app Payload/
-          zip -qr TukuruPlayer-unsigned.ipa Payload
-      - uses: actions/upload-artifact@v4
-        with:
-          name: TukuruPlayer-unsigned-ipa
-          path: TukuruPlayer-unsigned.ipa
