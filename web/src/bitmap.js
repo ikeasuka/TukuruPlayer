@@ -96,23 +96,47 @@ export class BitmapStore {
 
   async load(path) {
     const url = this.host.gameURL(path);
-    let p = this.imageCache.get(url);
-    if (!p) {
-      p = this.decode(url);
-      this.imageCache.set(url, p);
-      if (this.imageCache.size > 256) {
-        const first = this.imageCache.keys().next().value;
-        this.imageCache.delete(first);
-      }
+    let entry = this.imageCache.get(url);
+    if (entry) {
+      // refresh LRU position
+      this.imageCache.delete(url);
+      this.imageCache.set(url, entry);
+    } else {
+      entry = { p: this.decode(url), bytes: 0 };
+      this.imageCache.set(url, entry);
     }
     let img;
     try {
-      img = await p;
+      img = await entry.p;
     } catch (e) {
       this.imageCache.delete(url);
       throw new Error("Unable to find file: " + path);
     }
+    entry.bytes = img.width * img.height * 4;
+    this.trimImageCache();
     return this.add(new Bmp(img.width, img.height, img));
+  }
+
+  // Keep decoded images for re-use, limited by memory (iOS kills the web process on high memory).
+  trimImageCache(limit = 48 * 1048576) {
+    let total = 0;
+    for (const e of this.imageCache.values()) total += e.bytes;
+    for (const [k, e] of this.imageCache) {
+      if (total <= limit) break;
+      if (!e.bytes) continue; // still decoding
+      total -= e.bytes;
+      this.imageCache.delete(k);
+    }
+  }
+
+  // Approximate memory held by live bitmaps (pixels + GPU textures), in MB.
+  memoryMB() {
+    let bytes = 0;
+    for (const b of this.map.values()) {
+      const px = b.w * b.h * 4;
+      bytes += (b.canvas ? px : 0) + (b.tex ? px : 0);
+    }
+    return Math.round(bytes / 1048576);
   }
 
   fromPixels(w, h, pixels) {

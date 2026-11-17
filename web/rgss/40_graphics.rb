@@ -38,7 +38,30 @@ module Graphics
     def __wait_frame
       r = TKRCore.call(:frame).await.to_s
       @frame_count += 1
+      __memory_check if @frame_count % 15 == 0
       raise RGSSReset if r == 'reset'
+    end
+
+    # Bitmaps hold large pixel buffers in JS but look tiny to Ruby's GC, so scripts that
+    # create bitmaps without disposing them would exhaust memory before Ruby collects them.
+    # Run the GC when JS-side bitmap memory grows past a threshold.
+    GC_STEP_MB = 96
+    def __memory_check
+      mb = TKRCore.int(:bitmapMB)
+      @gc_base ||= 0
+      if @gc_pending
+        # finalizers have run since the last GC: measure the new baseline
+        @gc_pending = false
+        @gc_base = mb
+        return
+      end
+      return unless mb > @gc_base + GC_STEP_MB
+      GC.start
+      @gc_pending = true
+      @gc_runs = (@gc_runs || 0) + 1
+      if @gc_runs <= 5 || @gc_runs % 20 == 0
+        TKRCore.call(:stage, "GC ##{@gc_runs}: bitmaps #{mb}MB, count #{TKRCore.int(:bitmapCount)}")
+      end
     end
 
     def update
@@ -106,8 +129,11 @@ module Graphics
     def frame_reset; end
 
     def resize_screen(w, h)
-      @width = [[w.to_i, 1].max, 640].min
-      @height = [[h.to_i, 1].max, 480].min
+      w = [[w.to_i, 1].max, 640].min
+      h = [[h.to_i, 1].max, 480].min
+      return if w == @width && h == @height
+      @width = w
+      @height = h
       TKRCore.call(:resize, @width, @height)
     end
 

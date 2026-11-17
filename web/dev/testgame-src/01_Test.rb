@@ -148,6 +148,14 @@ def run_unit_tests
   buf = "\0" * 256
   Win32API.new('kernel32', 'GetPrivateProfileString', 'pppplp', 'l').call('Game', 'Title', '', buf, 255, '.\\Game.ini')
   TestLog.check('ini read', buf.delete("\0") == 'テストゲーム')
+  # scripts that never dispose bitmaps must not exhaust memory
+  peak = 0
+  240.times do
+    Bitmap.new(640, 480).fill_rect(0, 0, 640, 480, Color.new(1, 2, 3))
+    Graphics.update
+    peak = [peak, TKRCore.int(:bitmapMB)].max
+  end
+  TestLog.check("leaked bitmaps reclaimed (peak #{peak}MB)", peak < 300)
   fib = Fiber.new { Graphics.update; Fiber.yield 1; 2 }
   TestLog.check('Graphics.update inside Fiber', fib.resume == 1 && fib.resume == 2)
 end

@@ -226,6 +226,8 @@ async function main() {
     bmpRadialBlur: (id, a, d) => bitmaps.radialBlur(id, a, d),
     bmpDrawText: (id, x, y, w, h, s, align, font) => bitmaps.drawText(id, x, y, w, h, s, align, font),
     textSize: (font, s) => bitmaps.textSize(font, s),
+    bitmapMB: () => bitmaps.memoryMB(),
+    bitmapCount: () => bitmaps.map.size,
     fontExists: (name) => (bitmaps.fontExists(name) ? 1 : 0),
     // tables (tilemap data)
     tableUpload: (id, b64, xs, ys, zs) => scene.uploadTable(id, b64, xs, ys, zs),
@@ -235,8 +237,8 @@ async function main() {
       scene.render(list);
       renderer.present();
       frameNo++;
-      if (frameNo === 1 || frameNo % 600 === 0) {
-        Host.stage(`frame ${frameNo}: wasm ${memMB()}MB, bitmaps ${bitmaps.map.size}`);
+      if (frameNo === 1 || frameNo % 120 === 0) {
+        Host.stage(`frame ${frameNo}: wasm ${memMB()}MB, bitmaps ${bitmaps.map.size} (${bitmaps.memoryMB()}MB), ${renderer.width}x${renderer.height}`);
       }
     },
     frame: () => new Promise((resolve) => {
@@ -264,7 +266,13 @@ async function main() {
       const px = renderer.snapshotPixels();
       return bitmaps.fromPixels(renderer.width, renderer.height, px);
     },
-    resize: (w, h) => { renderer.resize(w, h); layout(); Host.post({ type: "resolution", w, h }); },
+    resize: (w, h) => {
+      if (w === renderer.width && h === renderer.height) return;
+      renderer.resize(w, h);
+      layout();
+      Host.stage(`resize_screen ${w}x${h}`);
+      Host.post({ type: "resolution", w, h });
+    },
     // input
     inputUpdate: () => input.update(),
     // audio (played natively)

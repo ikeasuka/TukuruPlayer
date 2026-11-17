@@ -177,8 +177,17 @@ export class Renderer {
     if (bmp.texVersion !== bmp.version) {
       gl.bindTexture(gl.TEXTURE_2D, bmp.tex);
       const src = bmp.source();
-      if (src) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
-      else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+      if (src && bmp.texW === bmp.w && bmp.texH === bmp.h) {
+        // same size: update in place instead of reallocating GPU memory every change
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, src);
+      } else if (src) {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+        bmp.texW = bmp.w;
+        bmp.texH = bmp.h;
+      } else {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+        bmp.texW = bmp.texH = 1;
+      }
       bmp.texVersion = bmp.version;
     }
     return bmp.tex;
