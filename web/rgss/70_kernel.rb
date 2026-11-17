@@ -254,6 +254,13 @@ class Win32API
   end
 
   def call(*args)
+    @@logged ||= {}
+    key = "#{@dll}:#{@func}"
+    unless @@logged[key]
+      @@logged[key] = true
+      shown = args.map { |a| a.is_a?(String) ? a[0, 40].inspect : a.inspect }.join(', ')
+      TKRCore.call(:log, "Win32API #{key}(#{shown}) -> stub") rescue nil
+    end
     case @func
     when 'GetPrivateProfileString', 'GetPrivateProfileStringA', 'GetPrivateProfileStringW'
       section, key, default, buf = args
