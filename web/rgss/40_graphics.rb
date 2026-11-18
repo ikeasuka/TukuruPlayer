@@ -32,7 +32,7 @@ module Graphics
       a = [@brightness]
       TKRCore.each_viewport { |v| v.__pack(a) }
       TKRCore.each_drawable { |d| d.__pack(a) }
-      a.join(',')
+      TKRCore::NATIVE ? a : a.join(',')
     end
 
     def __wait_frame

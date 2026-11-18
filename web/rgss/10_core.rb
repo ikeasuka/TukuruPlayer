@@ -24,7 +24,8 @@ end
 class RGSSReset < Exception; end
 
 module TKRCore
-  JSAPI = JS.global[:TKR]
+  NATIVE = !!$TKR_NATIVE
+  JSAPI = NATIVE ? nil : JS.global[:TKR]
   RGSS = $TKR_ENGINE || 3
 
   @uid = 0
@@ -32,16 +33,30 @@ module TKRCore
   @viewports = ObjectSpace::WeakMap.new
 
   class << self
-    def call(name, *args)
-      JSAPI.call(name, *args)
-    end
+    if NATIVE
+      def call(name, *args)
+        TKRNative.call(name, *args)
+      end
 
-    def int(name, *args)
-      JSAPI.call(name, *args).to_i
-    end
+      def int(name, *args)
+        TKRNative.call(name, *args).to_i
+      end
 
-    def str(name, *args)
-      JSAPI.call(name, *args).to_s
+      def str(name, *args)
+        TKRNative.call(name, *args).to_s
+      end
+    else
+      def call(name, *args)
+        JSAPI.call(name, *args)
+      end
+
+      def int(name, *args)
+        JSAPI.call(name, *args).to_i
+      end
+
+      def str(name, *args)
+        JSAPI.call(name, *args).to_s
+      end
     end
 
     def next_uid

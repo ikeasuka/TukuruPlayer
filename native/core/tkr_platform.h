@@ -30,6 +30,22 @@ double tkr_platform_text(const TkrFont *f, const char *utf8, uint8_t *mask, int 
 // Messages from the core (logging / diagnostics).
 void tkr_platform_log(const char *level, const char *msg);
 
+// Called once per Graphics.update after the frame was composed (tkr_render_output()).
+// Presents the frame and blocks until it is time for the next one. Returns 1 when the user
+// asked for a reset (F12), 0 otherwise.
+int tkr_platform_frame(void);
+void tkr_platform_set_frame_rate(int fps);
+
+// Audio commands (bgm_play, se_play, ...): op plus up to 5 string/int arguments.
+void tkr_platform_audio(const char *op, int argc, const char *const *sargs, const long *iargs);
+long tkr_platform_bgm_pos(void);
+
+// Blocking message box (msgbox / p in RGSS).
+void tkr_platform_msgbox(const char *text);
+
+// Lifecycle / diagnostics events: "stage", "ready", "error" (title\ntext), "exit", "title".
+void tkr_platform_event(const char *name, const char *text);
+
 #ifdef __cplusplus
 }
 #endif

@@ -73,7 +73,7 @@ module TKRBoot
     end
 
     def run
-      Dir.chdir('/game')
+      Dir.chdir('/game') unless $TKR_NATIVE
       $TEST = false
       $BTEST = false
       script_file = TKRCore::RGSS == 3 ? 'Data/Scripts.rvdata2' : 'Data/Scripts.rvdata'
