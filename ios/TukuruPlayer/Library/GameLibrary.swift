@@ -112,10 +112,10 @@ final class GameLibrary: ObservableObject {
     // MARK: - import
 
     /// Import a game from a folder or a .zip chosen in the Files app.
-    func importItem(at url: URL) {
+    func importItem(at url: URL, name: String? = nil) {
         let scoped = url.startAccessingSecurityScopedResource()
         importing = "読み込み中: \(url.lastPathComponent)"
-        let destName = url.deletingPathExtension().lastPathComponent
+        let destName = name ?? url.deletingPathExtension().lastPathComponent
         let dest = uniqueDestination(destName)
         Task.detached(priority: .userInitiated) {
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -137,12 +137,12 @@ final class GameLibrary: ObservableObject {
 
     /// Built-in tiny test game (web/dev/testgame) to check whether a problem depends on the game.
     func importSample() {
-        guard let base = Bundle.main.resourceURL?.appendingPathComponent("WebRuntime/samples/動作テスト"),
+        guard let base = Bundle.main.resourceURL?.appendingPathComponent("WebRuntime/samples/testgame"),
               FileManager.default.fileExists(atPath: base.path) else {
             lastError = "動作テスト用ゲームが見つかりません"
             return
         }
-        importItem(at: base)
+        importItem(at: base, name: "動作テスト")
     }
 
     // MARK: - RTP / SoundFont
