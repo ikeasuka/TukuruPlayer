@@ -3,7 +3,7 @@ import UIKit
 /// Overlay menu shown with the ≡ button or the controller's Options/Select button.
 /// Operable by touch and by game controller (D-pad + confirm/cancel).
 final class PauseMenuView: UIView {
-    enum Action: CaseIterable { case resume, reset, togglePad, quit }
+    enum Action: CaseIterable { case resume, reset, togglePad, shareLog, quit }
 
     var onSelect: ((Action) -> Void)?
     var padVisible = true { didSet { refreshTitles() } }
@@ -72,6 +72,7 @@ final class PauseMenuView: UIView {
         case .resume: return "ゲームに戻る"
         case .reset: return "タイトルに戻る（リセット / F12）"
         case .togglePad: return padVisible ? "タッチパッドを隠す" : "タッチパッドを表示"
+        case .shareLog: return "ログを共有"
         case .quit: return "ゲームを終了してライブラリへ"
         }
     }

@@ -42,6 +42,9 @@ final class VirtualPadView: UIView {
 
     /// Area of the screen showing the game; controls are placed outside of it when there is room.
     var gameRect: CGRect = .zero { didSet { if gameRect != oldValue { setNeedsLayout() } } }
+    /// Reports the chosen layout (for the log) whenever it changes.
+    var onLayout: ((String) -> Void)?
+    private var lastLayoutDesc = ""
 
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -83,6 +86,9 @@ final class VirtualPadView: UIView {
             dc = CGPoint(x: max(inset.left, 12) + 24 * s + 66 * s, y: bottom - 66 * s)
             bc = CGPoint(x: W - max(inset.right, 12) - 94 * s, y: bottom - 70 * s)
         }
+        let mode = portrait ? (below >= 150 ? "below" : "overlay") : (min(leftMargin, rightMargin) >= 70 ? "margins" : "overlay")
+        let desc = "\(mode) bounds \(Int(W))x\(Int(H)) game \(Int(gameRect.minX)),\(Int(gameRect.minY)) \(Int(gameRect.width))x\(Int(gameRect.height)) inset L\(Int(raw.left)) R\(Int(raw.right)) B\(Int(raw.bottom)) margins \(Int(leftMargin))/\(Int(rightMargin)) scale \(String(format: "%.2f", s))"
+        if desc != lastLayoutDesc { lastLayoutDesc = desc; onLayout?(desc) }
         dpadRadius = 66 * s
         dpadCenter = dc
         let off = 50 * s

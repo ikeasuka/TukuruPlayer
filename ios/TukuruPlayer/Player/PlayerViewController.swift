@@ -87,6 +87,7 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
 
         pad.frame = view.bounds
         pad.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        pad.onLayout = { [weak self] desc in self?.log.stage("pad layout: \(desc)") }
         pad.onMaskChange = { [weak self] m in
             self?.padMask = m
             self?.sendMask()
@@ -320,6 +321,8 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
             AppSettings.defaults.set(showing ? "never" : "always", forKey: AppSettings.Key.padMode)
             applyPadVisibility()
             pauseMenu.padVisible = !pad.isHidden
+        case .shareLog:
+            shareLog(afterCrash: false)
         case .quit:
             close()
         }
@@ -412,13 +415,13 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         present(alert, animated: true)
     }
 
-    private func shareLog() {
+    private func shareLog(afterCrash: Bool = true) {
         let vc = UIActivityViewController(activityItems: [log.fileURL], applicationActivities: nil)
         vc.popoverPresentationController?.sourceView = view
         vc.popoverPresentationController?.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
         vc.completionWithItemsHandler = { [weak self] _, _, _, _ in
             // offer the crash dialog again
-            guard let self, let wv = self.webView else { return }
+            guard afterCrash, let self, let wv = self.webView else { return }
             self.webViewWebContentProcessDidTerminate(wv)
         }
         present(vc, animated: true)
