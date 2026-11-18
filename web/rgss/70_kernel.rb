@@ -306,7 +306,10 @@ end
 module TKRTrace
   @last = {}
   @count = 0
+  @current = nil
   class << self
+    attr_accessor :current
+
     def install
       return if @installed
       @installed = true
@@ -337,6 +340,7 @@ module TKRTrace
       begin
         cmd = @list && @list[@index]
         if cmd && cmd.code != 0
+          TKRTrace.current = "マップ#{@map_id} イベント#{@event_id} #{@index + 1}行目 (コード#{cmd.code})"
           params = cmd.parameters.inspect
           params = params[0, 90] + "..." if params.size > 90
           TKRTrace.note("#{@map_id}:#{@event_id}:#{@index}",

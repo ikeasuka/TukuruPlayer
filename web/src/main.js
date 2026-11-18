@@ -214,7 +214,11 @@ async function main() {
   const tmpRoot = new Map();
   const stdout = ConsoleStdout.lineBuffered((l) => Host.log("info", l));
   const stderr = ConsoleStdout.lineBuffered((l) => Host.log("error", l));
-  const wasi = new WASI([], ["RUBYOPT=", "HOME=/game"], [
+  const wasi = new WASI([], ["RUBYOPT=", "HOME=/game",
+    // RGSS runs inside a Fiber (evalAsync); the default fiber VM stack only allows ~1000 nested
+    // Ruby method calls (RGSS on Windows: >10000). 1MB gives ~20000. Larger values don't help
+    // C-level (block) nesting, which is bounded by the wasm machine stack.
+    "RUBY_FIBER_VM_STACK_SIZE=1048576", "RUBY_THREAD_VM_STACK_SIZE=1048576"], [
     new OpenFile(new File([])), stdout, stderr,
     new PreopenDirectory("/game", gameRoot),
     new PreopenDirectory("/tkrtmp", tmpRoot),

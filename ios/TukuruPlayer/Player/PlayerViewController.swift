@@ -137,23 +137,23 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         let safe = b.inset(by: view.safeAreaInsets)
         let aspect = gameSize.width / max(1, gameSize.height)
         let game: CGRect
-        let padShown = !pad.isHidden
         if b.height > b.width {
             let w = safe.width
             let h = min(safe.height, (w / aspect).rounded())
             game = CGRect(x: safe.minX, y: safe.minY, width: w, height: h)
         } else {
-            // Landscape: keep black side margins wide enough for the D-pad and buttons.
-            let minMargin: CGFloat = padShown ? 130 : 0
-            var h = safe.height
-            var w = min(safe.width, (h * aspect).rounded())
-            if (safe.width - w) / 2 < minMargin {
-                w = max(safe.width * 0.5, safe.width - minMargin * 2)
-                h = (w / aspect).rounded()
-            }
-            game = CGRect(x: (b.width - w) / 2, y: safe.minY + (safe.height - h) / 2, width: w, height: h)
+            // Landscape: use the full screen height (aspect ratio kept); the pad goes in the side margins.
+            let h0 = b.height - max(view.safeAreaInsets.top, 0) - max(view.safeAreaInsets.bottom, 0)
+            var h = h0
+            var w = (h * aspect).rounded()
+            if w > safe.width { w = safe.width; h = (w / aspect).rounded() }
+            game = CGRect(x: (b.width - w) / 2, y: safe.minY + (h0 - h) / 2, width: w, height: h)
         }
-        if webView.frame != game { webView.frame = game }
+        if webView.frame != game {
+            webView.frame = game
+            // WKWebView doesn't always fire 'resize' when only its frame changes (e.g. on rotation).
+            webView.evaluateJavaScript("window.dispatchEvent(new Event('resize'))", completionHandler: nil)
+        }
         pad.frame = b
         pad.gameRect = game
         // menu button: top-left corner (hidden until the corner is tapped)

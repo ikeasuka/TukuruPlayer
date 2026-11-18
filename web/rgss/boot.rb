@@ -30,6 +30,8 @@ module TKRBoot
       end
       title = e.is_a?(SyntaxError) ? 'Script syntax error' : "#{e.class}"
       body = "#{e.message}\n\n#{bt.first(12).join("\n")}"
+      cur = defined?(TKRTrace) && TKRTrace.current
+      body += "\n\n実行中のイベント: #{cur}" if cur
       TKRCore.call(:error, title, body)
       ctx = source_context(bt)
       TKRCore.call(:log, ctx) if ctx

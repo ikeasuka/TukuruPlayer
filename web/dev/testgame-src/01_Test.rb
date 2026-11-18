@@ -183,6 +183,13 @@ def run_unit_tests
   TestLog.check("leaked bitmaps reclaimed (peak #{peak}MB)", peak < 300)
   fib = Fiber.new { Graphics.update; Fiber.yield 1; 2 }
   TestLog.check('Graphics.update inside Fiber', fib.resume == 1 && fib.resume == 2)
+  # Deep recursion: RGSS (Ruby 1.8/1.9 on Windows) handles thousands of nested calls.
+  o = Object.new
+  def o.r(k) k >= 20000 ? (Graphics.update; k) : r(k + 1) end
+  def o.s(k) k >= 300 ? k : [1].each { return s(k + 1) } end
+  plain = begin; o.r(0); rescue Exception; $!.class.name; end
+  blk = begin; o.s(0); rescue Exception; $!.class.name; end
+  TestLog.check("deep recursion (method #{plain}, block #{blk})", plain == 20000 && blk == 300)
 end
 
 rgss_main do
