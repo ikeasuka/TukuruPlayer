@@ -412,8 +412,11 @@ export class BitmapStore {
     const fam = names.map((n) => '"' + n.replace(/"/g, "") + '"').concat(FALLBACK_FONTS).join(",");
     const size = Math.max(1, parseInt(p[1], 10) || 24);
     const bold = p[2] === "1", italic = p[3] === "1";
+    // RGSS (GDI) draws a "size N" font noticeably smaller than an N px CSS font; 0.9 matches
+    // the Windows look closely (the same factor mkxp uses) and keeps text inside its windows.
+    const px = Math.round(size * 0.9 * 10) / 10;
     return {
-      css: `${italic ? "italic " : ""}${bold ? "bold " : ""}${size}px ${fam}`,
+      css: `${italic ? "italic " : ""}${bold ? "bold " : ""}${px}px ${fam}`,
       size,
       outline: p[4] === "1",
       shadow: p[5] === "1",

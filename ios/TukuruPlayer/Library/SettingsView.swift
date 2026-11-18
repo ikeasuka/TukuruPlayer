@@ -15,7 +15,7 @@ struct SettingsView: View {
     @AppStorage(AppSettings.Key.showFPS) private var showFPS = false
     @AppStorage(AppSettings.Key.ignoreSilent) private var ignoreSilent = false
     @AppStorage(AppSettings.Key.gameFonts) private var gameFonts = true
-    @AppStorage(AppSettings.Key.noJIT) private var noJIT = false
+    @AppStorage(AppSettings.Key.noJIT) private var noJIT = true
 
     @State private var mapping = AppSettings.mapping
     @State private var rtpTarget: Int?

@@ -29,6 +29,17 @@ module TKRBoot
         return
       end
       title = e.is_a?(SyntaxError) ? 'Script syntax error' : "#{e.class}"
+      all = e.backtrace || []
+      if e.is_a?(SystemStackError) && !all.empty?
+        # A runaway recursion: show the frames that repeat most (where the loop is).
+        counts = Hash.new(0)
+        all.each { |l| counts[l] += 1 }
+        top = counts.sort_by { |_, n| -n }.first(8).map { |l, n| "#{n}x #{l}" }
+        TKRCore.call(:log, "SystemStackError: #{all.size} frames; most repeated:\n#{top.join("\n")}\nfirst frames:\n#{all.first(15).join("\n")}")
+        bt = top
+      elsif bt.empty?
+        bt = all
+      end
       body = "#{e.message}\n\n#{bt.first(12).join("\n")}"
       cur = defined?(TKRTrace) && TKRTrace.current
       body += "\n\n実行中のイベント: #{cur}" if cur

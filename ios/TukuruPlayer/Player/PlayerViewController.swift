@@ -15,6 +15,7 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
     private var audio: GameAudio!
     private let controllers = ControllerManager()
     private let pad = VirtualPadView()
+    private var lastLoggedSize = CGSize.zero
     private let menuButton = UIButton(type: .system)
     private let pauseMenu = PauseMenuView()
     private var padMask: UInt32 = 0
@@ -160,7 +161,15 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         let b = view.bounds
-        let safe = b.inset(by: view.safeAreaInsets)
+        // Cap the insets: landscape sometimes reports huge left/right insets (see VirtualPadView).
+        let raw = view.safeAreaInsets
+        let insets = UIEdgeInsets(top: min(raw.top, 60), left: min(raw.left, 50),
+                                  bottom: min(raw.bottom, 34), right: min(raw.right, 50))
+        let safe = b.inset(by: insets)
+        if b.size != lastLoggedSize {
+            lastLoggedSize = b.size
+            log.stage("layout \(Int(b.width))x\(Int(b.height)) safe area \(Int(raw.top)),\(Int(raw.left)),\(Int(raw.bottom)),\(Int(raw.right))")
+        }
         let aspect = gameSize.width / max(1, gameSize.height)
         let game: CGRect
         if b.height > b.width {
@@ -169,7 +178,7 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
             game = CGRect(x: safe.minX, y: safe.minY, width: w, height: h)
         } else {
             // Landscape: use the full screen height (aspect ratio kept); the pad goes in the side margins.
-            let h0 = b.height - max(view.safeAreaInsets.top, 0) - max(view.safeAreaInsets.bottom, 0)
+            let h0 = b.height - insets.top - insets.bottom
             var h = h0
             var w = (h * aspect).rounded()
             if w > safe.width { w = safe.width; h = (w / aspect).rounded() }

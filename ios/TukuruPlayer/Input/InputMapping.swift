@@ -115,7 +115,7 @@ enum AppSettings {
             Key.showFPS: false,
             Key.ignoreSilent: false,
             Key.gameFonts: true,
-            Key.noJIT: false,
+            Key.noJIT: true,
         ])
     }
 

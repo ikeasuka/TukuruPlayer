@@ -45,7 +45,11 @@ final class VirtualPadView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        let inset = safeAreaInsets
+        // Some iOS versions report very large left/right safe-area insets in landscape (seen: ~177pt),
+        // which pushed the pad onto the game. The notch never needs more than ~50pt.
+        let raw = safeAreaInsets
+        let inset = UIEdgeInsets(top: min(raw.top, 60), left: min(raw.left, 50),
+                                 bottom: min(raw.bottom, 34), right: min(raw.right, 50))
         let W = bounds.width, H = bounds.height
         let portrait = H > W
         var s: CGFloat
@@ -64,10 +68,10 @@ final class VirtualPadView: UIView {
             let cy = (top + bottom) / 2 + 22 * s
             dc = CGPoint(x: max(inset.left + 16 + 66 * s, W * 0.27), y: cy)
             bc = CGPoint(x: min(W - inset.right - 16 - 79 * s, W * 0.73), y: cy)
-        } else if !gameRect.isEmpty && !portrait && min(leftMargin, rightMargin) >= 90 {
+        } else if !gameRect.isEmpty && !portrait && min(leftMargin, rightMargin) >= 70 {
             // Landscape: D-pad in the left margin, buttons in the right margin
             let m = min(leftMargin, rightMargin)
-            s = max(0.5, min(m / 170, H / 300, 1.35) * padScale)
+            s = max(0.45, min(m / 165, H / 300, 1.35) * padScale)
             let bottom = H - max(inset.bottom, 12)
             dc = CGPoint(x: inset.left + leftMargin / 2, y: bottom - 66 * s - 24 * s)
             bc = CGPoint(x: gameRect.maxX + rightMargin / 2, y: bottom - 70 * s - 20 * s)

@@ -249,6 +249,7 @@ async function main() {
 
   // ---- API exposed to Ruby ----------------------------------------------------------
   const audio = (op, ...args) => Host.post({ type: "audio", op, args });
+  const perf = { frame: 0, t: 0, draw: 0 };
   let bgmPos = 0;
   let pendingMsg = null;
 
@@ -284,11 +285,18 @@ async function main() {
     // graphics
     render: (list) => {
       window.TKR.lastList = list; // for debugging
+      const t0 = performance.now();
       scene.render(list);
       renderer.present();
       frameNo++;
+      perf.draw += performance.now() - t0;
       if (frameNo === 1 || frameNo % 120 === 0) {
-        Host.stage(`frame ${frameNo}: wasm ${memMB()}MB, bitmaps ${bitmaps.map.size} (${bitmaps.memoryMB()}MB), ${renderer.width}x${renderer.height}`);
+        const now = performance.now();
+        const n = frameNo - perf.frame, dt = (now - perf.t) / 1000;
+        const fps = perf.frame && dt > 0 ? (n / dt).toFixed(1) : "-";
+        const draw = n > 0 ? (perf.draw / n).toFixed(1) : "-";
+        Host.stage(`frame ${frameNo}: ${fps} fps (draw ${draw}ms), wasm ${memMB()}MB, bitmaps ${bitmaps.map.size} (${bitmaps.memoryMB()}MB), ${renderer.width}x${renderer.height}`);
+        perf.frame = frameNo; perf.t = now; perf.draw = 0;
       }
     },
     frame: () => new Promise((resolve) => {
