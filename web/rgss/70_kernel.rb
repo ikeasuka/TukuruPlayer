@@ -235,6 +235,7 @@ module Kernel
   end
 
   def rgss_main
+    TKRTrace.install
     loop do
       begin
         yield
@@ -296,4 +297,66 @@ class Win32API
     end
   end
   alias Call call
+end
+
+
+# Diagnostics: report each event command (and scene change) to the app log, so a crash of the
+# web process can be traced back to the event command that was running. Throttled so that
+# parallel/looping events don't flood the log.
+module TKRTrace
+  @last = {}
+  @count = 0
+  class << self
+    def install
+      return if @installed
+      @installed = true
+      if defined?(::Game_Interpreter) && ::Game_Interpreter.method_defined?(:execute_command)
+        ::Game_Interpreter.prepend(InterpreterHook)
+      end
+      if defined?(::SceneManager) && ::SceneManager.respond_to?(:goto)
+        ::SceneManager.singleton_class.prepend(SceneHook)
+      end
+    rescue Exception => e
+      TKRCore.call(:stage, "trace install failed: #{e.class}")
+    end
+
+    def note(key, text)
+      f = Graphics.frame_count
+      last = @last[key]
+      return if last && f - last < 600
+      @count += 1
+      return if @count > 5000
+      @last[key] = f
+      TKRCore.call(:stage, text)
+    rescue Exception
+    end
+  end
+
+  module InterpreterHook
+    def execute_command
+      begin
+        cmd = @list && @list[@index]
+        if cmd && cmd.code != 0
+          params = cmd.parameters.inspect
+          params = params[0, 90] + "..." if params.size > 90
+          TKRTrace.note("#{@map_id}:#{@event_id}:#{@index}",
+            "event map#{@map_id} ev#{@event_id} ##{@index} code #{cmd.code} #{params}")
+        end
+      rescue Exception
+      end
+      super
+    end
+  end
+
+  module SceneHook
+    %w[goto call].each do |m|
+      define_method(m) do |*args|
+        begin
+          TKRCore.call(:stage, "scene #{m} #{args[0]}")
+        rescue Exception
+        end
+        super(*args)
+      end
+    end
+  end
 end

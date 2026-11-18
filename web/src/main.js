@@ -113,6 +113,7 @@ async function main() {
   const bitmaps = new BitmapStore(Host, renderer);
   const scene = new SceneDrawer(renderer, bitmaps);
   renderer.onCrumb = (k, t) => bitmaps.crumb(k, t);
+  scene.onCrumb = (k, t) => bitmaps.crumb(k, t);
   const input = new Input();
   canvas.addEventListener("webglcontextlost", () => Host.log("error", "WebGL context lost (GPU process restarted?)"));
   canvas.addEventListener("webglcontextrestored", () => Host.log("error", "WebGL context restored"));

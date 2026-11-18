@@ -94,6 +94,8 @@ export class SceneDrawer {
         r.scissor(null);
         const fx = vp.flash[3] > 0 ? vp.flash : vp.color;
         if (fx[3] > 0 || vp.tone[0] || vp.tone[1] || vp.tone[2] || vp.tone[3]) {
+          if (this.onCrumb) this.onCrumb(`vfx:${clip.join("x")}:${fx[3] > 0}:${!!(vp.tone[0] || vp.tone[1] || vp.tone[2] || vp.tone[3])}`,
+            `viewport effect ${clip.join(",")} color=${fx[3] > 0} tone=${vp.tone.join("/")}`);
           r.applyEffect(clip, fx, vp.tone);
         }
       } else {
@@ -128,6 +130,11 @@ export class SceneDrawer {
     const tone = [a[k + 25], a[k + 26], a[k + 27], a[k + 28]];
     const waveAmp = a[k + 29], waveLen = a[k + 30], wavePhase = a[k + 31];
     if (opacity <= 0 || zx === 0 || zy === 0) return;
+    if (this.onCrumb) {
+      const f = `b${blend}${angle ? " rot" : ""}${mirror ? " mir" : ""}${waveAmp > 0 ? " wave" : ""}${bushDepth > 0 ? " bush" : ""}` +
+        `${color[3] > 0 ? " color" : ""}${tone[0] || tone[1] || tone[2] || tone[3] ? " tone" : ""}${zx !== 1 || zy !== 1 ? " zoom" : ""}`;
+      this.onCrumb("spr:" + f, `sprite ${f} (${b.w}x${b.h})`);
+    }
     const fullW = sw;
     // clip src rect to bitmap
     let lx = 0, ly = 0;
@@ -179,6 +186,7 @@ export class SceneDrawer {
     const color = [a[k + 11], a[k + 12], a[k + 13], a[k + 14]];
     const tone = [a[k + 15], a[k + 16], a[k + 17], a[k + 18]];
     if (opacity <= 0) return;
+    if (this.onCrumb) this.onCrumb(`plane:${b.w}x${b.h}:${blend}`, `plane ${b.w}x${b.h} blend ${blend} zoom ${zx}x${zy}`);
     const tex = r.texFor(b);
     r.setRepeat(b, true);
     const x = clip[0], y = clip[1], w = clip[2], h = clip[3];

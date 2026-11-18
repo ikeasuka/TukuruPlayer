@@ -107,9 +107,9 @@ jobs:
           done
           sleep 20   # keep running a bit longer (web process kills were seen ~12s after start)
           mkdir -p sim-results
-          xcrun simctl io "$UDID" screenshot sim-results/screen.png || true
           cp "$LOG" sim-results/ 2>/dev/null || true
           echo "===== app log ====="; grep -v "\[stage\] script:" "$LOG" | tail -n 120 || true
+          perl -e 'alarm 30; exec @ARGV' xcrun simctl io "$UDID" screenshot sim-results/screen.png || true
           grep -q "FLOW DONE" "$LOG" && ! grep -q "terminated\|APP CRASH\|TEST NG\|ERROR" "$LOG"
       - uses: actions/upload-artifact@v4
         if: always()

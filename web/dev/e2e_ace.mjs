@@ -84,7 +84,7 @@ try {
   failed = true;
 }
 const bad = logs.filter((l) => /error|PAGEERROR|NG/i.test(l) && !/\[stage\]/.test(l) && !/GL Driver Message/.test(l));
-console.log(logs.filter((l) => l.startsWith("[stage]") && !l.includes("script:")).slice(-8).join("\n"));
+console.log(logs.filter((l) => l.startsWith("[stage]") && !l.includes("script:")).slice(-(+process.env.TKR_STAGES || 8)).join("\n"));
 if (bad.length) { console.log("ERRORS:\n" + bad.slice(0, 20).join("\n")); failed = true; }
 console.log(serverLog.join("").split("\n").filter((l) => /\[save\]|\[audio\]/.test(l)).slice(0, 30).join("\n"));
 await browser.close();
