@@ -2,6 +2,17 @@
 
 const FALLBACK_FONTS = ['"Hiragino Sans"', '"Hiragino Kaku Gothic ProN"', '"Noto Sans JP"', '"Noto Sans CJK JP"', "sans-serif"];
 
+// All bitmap canvases are CPU-backed ("willReadFrequently"): on iOS, GPU-accelerated 2D canvases
+// live in the GPU process and handing them to WebGL / drawImage across processes crashed the
+// web content process. Textures are uploaded from the canvas pixels instead (see gl.js).
+export function newCanvas(w, h) {
+  const cv = document.createElement("canvas");
+  cv.width = Math.max(1, w | 0);
+  cv.height = Math.max(1, h | 0);
+  const c = cv.getContext("2d", { willReadFrequently: true });
+  return [cv, c];
+}
+
 export class Bmp {
   constructor(w, h, image = null) {
     this.w = Math.max(1, w | 0);
@@ -15,10 +26,7 @@ export class Bmp {
   }
   ctx() {
     if (!this.c) {
-      const cv = document.createElement("canvas");
-      cv.width = this.w;
-      cv.height = this.h;
-      const c = cv.getContext("2d");
+      const [cv, c] = newCanvas(this.w, this.h);
       if (!c) {
         // canvas memory limit reached: keep the bitmap usable as an empty image
         console.error(`canvas ${this.w}x${this.h} could not be created`);
@@ -113,10 +121,7 @@ export class BitmapStore {
     }
     try {
       const w = src.width, h = src.height;
-      const cv = document.createElement("canvas");
-      cv.width = Math.max(1, w);
-      cv.height = Math.max(1, h);
-      const c = cv.getContext("2d");
+      const [cv, c] = newCanvas(w, h);
       if (!c) throw new Error(`canvas ${w}x${h} unavailable`);
       c.drawImage(src, 0, 0);
       return cv;
@@ -383,9 +388,8 @@ export class BitmapStore {
     const d = this.get(id);
     const c = d.ctx();
     division = Math.max(2, Math.min(100, division | 0));
-    const copy = document.createElement("canvas");
-    copy.width = d.w; copy.height = d.h;
-    copy.getContext("2d").drawImage(d.canvas, 0, 0);
+    const [copy, cc] = newCanvas(d.w, d.h);
+    cc.drawImage(d.canvas, 0, 0);
     c.clearRect(0, 0, d.w, d.h);
     const cx = d.w / 2, cy = d.h / 2;
     for (let i = 0; i < division; i++) {

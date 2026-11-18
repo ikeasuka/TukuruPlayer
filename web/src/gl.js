@@ -177,12 +177,20 @@ export class Renderer {
     if (bmp.texVersion !== bmp.version) {
       gl.bindTexture(gl.TEXTURE_2D, bmp.tex);
       const src = bmp.source();
-      if (src && bmp.texW === bmp.w && bmp.texH === bmp.h) {
+      // Upload from the pixels (CPU) rather than the canvas element itself (see bitmap.js).
+      let px = null;
+      if (src) {
+        try {
+          const c = src.getContext ? src.getContext("2d", { willReadFrequently: true }) : null;
+          px = c ? c.getImageData(0, 0, bmp.w, bmp.h).data : null;
+        } catch (e) { px = null; }
+      }
+      if (px && bmp.texW === bmp.w && bmp.texH === bmp.h) {
         // same size: update in place instead of reallocating GPU memory every change
-        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, src);
-      } else if (src) {
-        if (this.onCrumb) this.onCrumb(`tex:${bmp.w}x${bmp.h}`, `texture upload ${bmp.w}x${bmp.h} (${src.constructor.name})`);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, bmp.w, bmp.h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      } else if (px) {
+        if (this.onCrumb) this.onCrumb(`tex:${bmp.w}x${bmp.h}`, `texture upload ${bmp.w}x${bmp.h}`);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, bmp.w, bmp.h, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
         bmp.texW = bmp.w;
         bmp.texH = bmp.h;
       } else {
