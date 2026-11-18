@@ -306,10 +306,8 @@ end
 module TKRTrace
   @last = {}
   @count = 0
-  @current = nil
+  @cur = nil
   class << self
-    attr_accessor :current
-
     def install
       return if @installed
       @installed = true
@@ -323,31 +321,34 @@ module TKRTrace
       TKRCore.call(:stage, "trace install failed: #{e.class}")
     end
 
-    def note(key, text)
+    # Cheap per-command bookkeeping (runs for every event command): no string building here.
+    def record(interp, map_id, event_id, index, cmd)
+      @cur = [map_id, event_id, index, cmd.code]
+      return if @count > 5000
+      key = (map_id << 40) ^ (event_id << 20) ^ index
       f = Graphics.frame_count
       last = @last[key]
       return if last && f - last < 600
-      @count += 1
-      return if @count > 5000
       @last[key] = f
-      TKRCore.call(:stage, text)
-    rescue Exception
+      @count += 1
+      params = cmd.parameters.inspect
+      params = params[0, 90] + "..." if params.size > 90
+      TKRCore.call(:stage, "event map#{map_id} ev#{event_id} ##{index} code #{cmd.code} #{params}")
+    rescue Exception => e
+      @count += 1
+      TKRCore.call(:stage, "trace error #{e.class}: #{e.message}") if @count < 3
+    end
+
+    def current
+      c = @cur
+      c && "マップ#{c[0]} イベント#{c[1]} #{c[2] + 1}行目 (コード#{c[3]})"
     end
   end
 
   module InterpreterHook
     def execute_command
-      begin
-        cmd = @list && @list[@index]
-        if cmd && cmd.code != 0
-          TKRTrace.current = "マップ#{@map_id} イベント#{@event_id} #{@index + 1}行目 (コード#{cmd.code})"
-          params = cmd.parameters.inspect
-          params = params[0, 90] + "..." if params.size > 90
-          TKRTrace.note("#{@map_id}:#{@event_id}:#{@index}",
-            "event map#{@map_id} ev#{@event_id} ##{@index} code #{cmd.code} #{params}")
-        end
-      rescue Exception
-      end
+      cmd = @list && @list[@index]
+      TKRTrace.record(self, @map_id || 0, @event_id || 0, @index || 0, cmd) if cmd && cmd.code != 0
       super
     end
   end

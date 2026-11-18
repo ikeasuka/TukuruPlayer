@@ -31,10 +31,14 @@ targets:
         buildPhase: resources
     dependencies:
       - package: ZIPFoundation
-    info:
-      path: ios/TukuruPlayer/Info.plist
     settings:
       base:
+        # Use the hand-written Info.plist as is. (XcodeGen's `info:` option regenerates the file
+        # and dropped UILaunchScreen, which made iOS run the app in 320x480 compatibility mode.)
+        INFOPLIST_FILE: ios/TukuruPlayer/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
         PRODUCT_BUNDLE_IDENTIFIER: com.tukuruplayer.app
         PRODUCT_NAME: TukuruPlayer
         TARGETED_DEVICE_FAMILY: "1,2"
