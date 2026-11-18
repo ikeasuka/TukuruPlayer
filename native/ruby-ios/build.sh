@@ -4,6 +4,7 @@
 # must be on PATH (used as BASERUBY).
 #   native/ruby-ios/build.sh <out-dir>
 set -euo pipefail
+set -x
 RUBY_VERSION=${RUBY_VERSION:-3.4.1}
 MINOS=16.0
 OUT=$(cd "${1:-out}" 2>/dev/null && pwd || (mkdir -p "${1:-out}" && cd "${1:-out}" && pwd))
@@ -54,6 +55,7 @@ build_one() {   # $1 = sdk (iphoneos|iphonesimulator)
   cd "$WORK"
 }
 
+set +x
 build_one iphoneos
 build_one iphonesimulator
 rm -rf "$OUT/Ruby.xcframework"
