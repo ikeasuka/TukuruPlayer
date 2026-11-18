@@ -16,6 +16,7 @@ struct SettingsView: View {
     @AppStorage(AppSettings.Key.ignoreSilent) private var ignoreSilent = false
     @AppStorage(AppSettings.Key.gameFonts) private var gameFonts = true
     @AppStorage(AppSettings.Key.noJIT) private var noJIT = true
+    @AppStorage(AppSettings.Key.rubyVersion) private var rubyVersion = "3.4"
 
     @State private var mapping = AppSettings.mapping
     @State private var rtpTarget: Int?
@@ -99,10 +100,15 @@ struct SettingsView: View {
 
                 Section {
                     Toggle("JIT（高速化）を使わない", isOn: $noJIT)
+                    Picker("Ruby エンジン", selection: $rubyVersion) {
+                        Text("3.4（標準）").tag("3.4")
+                        Text("3.4 最適化版").tag("3.4-opt")
+                        Text("3.3").tag("3.3")
+                    }
                 } header: {
                     Text("動作の安定性")
                 } footer: {
-                    Text("起動から10秒ほどでゲームが落ちる場合に試してください。表示エンジンの高速化機能を止めて動かします（動作は遅くなります）。")
+                    Text("起動から10秒ほどでゲームが落ちる場合に試してください。表示エンジンの高速化機能を止めて動かします（動作は遅くなります）。JIT をオンにして落ちる場合は、Ruby エンジンを切り替えると落ちなくなることがあります。")
                 }
 
                 Section("情報") {

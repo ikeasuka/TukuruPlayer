@@ -225,15 +225,16 @@ async function main() {
   ], { debug: false });
 
   loading.textContent = "Ruby を起動中…";
-  Host.stage(`compiling ruby.wasm (WebAssembly ${typeof WebAssembly})`);
+  const wasmFile = { "3.3": "ruby-3.3.wasm", "3.4-opt": "ruby-3.4-opt.wasm" }[settings.rubyVersion] || "ruby.wasm";
+  Host.stage(`compiling ${wasmFile} (WebAssembly ${typeof WebAssembly})`);
   if (typeof WebAssembly === "undefined") {
     throw new Error("WebAssembly が使えません。設定の「JIT（高速化）を使わない」をオフにしてください。");
   }
   let module;
   try {
-    module = await WebAssembly.compileStreaming(fetch("ruby.wasm"));
+    module = await WebAssembly.compileStreaming(fetch(wasmFile));
   } catch (e) {
-    const buf = await (await fetch("ruby.wasm")).arrayBuffer();
+    const buf = await (await fetch(wasmFile)).arrayBuffer();
     module = await WebAssembly.compile(buf);
   }
   const { vm, instance } = await RubyVM.instantiateModule({

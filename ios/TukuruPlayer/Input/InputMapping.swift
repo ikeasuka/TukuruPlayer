@@ -101,6 +101,7 @@ enum AppSettings {
         static let ignoreSilent = "audio.ignoreSilent" // Bool
         static let gameFonts = "display.gameFonts"  // Bool: load fonts shipped in the game's Fonts folder
         static let noJIT = "engine.noJIT"          // Bool: run the web content process without JIT
+        static let rubyVersion = "engine.ruby"     // "3.4" | "3.4-opt" | "3.3"
         static let mapping = "controller.mapping"  // JSON
     }
 
@@ -116,6 +117,7 @@ enum AppSettings {
             Key.ignoreSilent: false,
             Key.gameFonts: true,
             Key.noJIT: true,
+            Key.rubyVersion: "3.4",
         ])
     }
 
@@ -148,6 +150,7 @@ enum AppSettings {
             "scale": defaults.string(forKey: Key.scaleMode) ?? "fit",
             "showFPS": defaults.bool(forKey: Key.showFPS),
             "gameFonts": defaults.bool(forKey: Key.gameFonts),
+            "rubyVersion": defaults.string(forKey: Key.rubyVersion) ?? "3.4",
         ]
     }
 }

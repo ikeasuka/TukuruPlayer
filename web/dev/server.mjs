@@ -36,7 +36,7 @@ const server = http.createServer(async (req, res) => {
     if (p.startsWith("/game/")) {
       const rel = p.slice(6);
       if (rel === "__boot.json") {
-        res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(gfs.bootInfo()));
+        res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ ...gfs.bootInfo(), settings: { ...(gfs.bootInfo().settings || {}), rubyVersion: process.env.TKR_RUBY || "3.4" } }));
         return;
       }
       const data = gfs.read(rel);

@@ -39,9 +39,20 @@ await esbuild.build({
 });
 
 fs.copyFileSync(path.join(here, "src", "index.html"), path.join(out, "index.html"));
-const wasmSrc = path.join(here, "node_modules", "@ruby", "3.4-wasm-wasi", "dist", "ruby.wasm");
-const wasmDst = path.join(out, "ruby.wasm");
-if (!fs.existsSync(wasmDst) || fs.statSync(wasmDst).size !== fs.statSync(wasmSrc).size) {
-  fs.copyFileSync(wasmSrc, wasmDst);
+// ruby.wasm = Ruby 3.4 (default); other versions are selectable in the app's settings
+// (different builds as a workaround for iOS WebKit JIT crashes).
+for (const [ver, name] of [["3.4", "ruby.wasm"], ["3.3", "ruby-3.3.wasm"]]) {
+  const wasmSrc = path.join(here, "node_modules", "@ruby", `${ver}-wasm-wasi`, "dist", "ruby.wasm");
+  const wasmDst = path.join(out, name);
+  if (!fs.existsSync(wasmSrc)) { console.warn("missing", wasmSrc); continue; }
+  if (!fs.existsSync(wasmDst) || fs.statSync(wasmDst).size !== fs.statSync(wasmSrc).size) {
+    fs.copyFileSync(wasmSrc, wasmDst);
+  }
+}
+// Ruby 3.4 re-optimized with binaryen (wasm-opt -O2 --all-features): same program, different code
+// layout for the JIT. Generated once and kept in web/vendor (wasm-opt takes minutes).
+{
+  const src = path.join(here, "vendor", "ruby-3.4-opt.wasm"), dst = path.join(out, "ruby-3.4-opt.wasm");
+  if (fs.existsSync(src) && (!fs.existsSync(dst) || fs.statSync(dst).size !== fs.statSync(src).size)) fs.copyFileSync(src, dst);
 }
 console.log("Web runtime written to", out);

@@ -64,7 +64,10 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
             } else {
                 log.stage("JIT setting not supported on this iOS")
             }
+        } else {
+            log.stage("JIT enabled")
         }
+        log.stage("ruby engine: \(AppSettings.defaults.string(forKey: AppSettings.Key.rubyVersion) ?? "3.4")")
         webView = WKWebView(frame: view.bounds, configuration: config)
         webView.isOpaque = false
         webView.backgroundColor = .black

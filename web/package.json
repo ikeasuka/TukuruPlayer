@@ -11,7 +11,8 @@
   "dependencies": {
     "@bjorn3/browser_wasi_shim": "0.4.2",
     "@ruby/3.4-wasm-wasi": "2.10.1",
-    "@ruby/wasm-wasi": "2.10.1"
+    "@ruby/wasm-wasi": "2.10.1",
+    "@ruby/3.3-wasm-wasi": "2.10.1"
   },
   "devDependencies": {
     "esbuild": "0.25.12"
