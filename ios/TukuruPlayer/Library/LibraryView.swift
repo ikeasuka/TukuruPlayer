@@ -41,6 +41,7 @@ struct LibraryView: View {
                     Menu {
                         Button { openImporter([.folder]) } label: { Label("フォルダから追加", systemImage: "folder") }
                         Button { openImporter([.zip]) } label: { Label("ZIP から追加", systemImage: "doc.zipper") }
+                        Button { library.importSample() } label: { Label("動作テスト用ゲームを追加", systemImage: "stethoscope") }
                     } label: { Image(systemName: "plus") }
                     .accessibilityLabel("ゲームを追加")
                 }

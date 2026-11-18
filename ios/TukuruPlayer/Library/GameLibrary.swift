@@ -135,6 +135,16 @@ final class GameLibrary: ObservableObject {
         }
     }
 
+    /// Built-in tiny test game (web/dev/testgame) to check whether a problem depends on the game.
+    func importSample() {
+        guard let base = Bundle.main.resourceURL?.appendingPathComponent("WebRuntime/samples/動作テスト"),
+              FileManager.default.fileExists(atPath: base.path) else {
+            lastError = "動作テスト用ゲームが見つかりません"
+            return
+        }
+        importItem(at: base)
+    }
+
     // MARK: - RTP / SoundFont
 
     /// Import an RTP folder (the folder containing Graphics/ and Audio/).
