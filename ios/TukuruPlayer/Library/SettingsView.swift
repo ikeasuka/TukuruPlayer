@@ -15,6 +15,7 @@ struct SettingsView: View {
     @AppStorage(AppSettings.Key.showFPS) private var showFPS = false
     @AppStorage(AppSettings.Key.ignoreSilent) private var ignoreSilent = false
     @AppStorage(AppSettings.Key.gameFonts) private var gameFonts = true
+    @AppStorage(AppSettings.Key.noJIT) private var noJIT = false
 
     @State private var mapping = AppSettings.mapping
     @State private var rtpTarget: Int?
@@ -94,6 +95,14 @@ struct SettingsView: View {
                     Text("RTP（ランタイムパッケージ）")
                 } footer: {
                     Text("RTP を必要とするゲームでは、PC にインストールされた RTP フォルダ（Graphics / Audio を含むフォルダ）を読み込んでください。")
+                }
+
+                Section {
+                    Toggle("JIT（高速化）を使わない", isOn: $noJIT)
+                } header: {
+                    Text("動作の安定性")
+                } footer: {
+                    Text("起動から10秒ほどでゲームが落ちる場合に試してください。表示エンジンの高速化機能を止めて動かします（動作は遅くなります）。")
                 }
 
                 Section("情報") {

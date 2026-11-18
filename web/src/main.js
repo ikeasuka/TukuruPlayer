@@ -225,7 +225,10 @@ async function main() {
   ], { debug: false });
 
   loading.textContent = "Ruby を起動中…";
-  Host.stage("compiling ruby.wasm");
+  Host.stage(`compiling ruby.wasm (WebAssembly ${typeof WebAssembly})`);
+  if (typeof WebAssembly === "undefined") {
+    throw new Error("WebAssembly が使えません。設定の「JIT（高速化）を使わない」をオフにしてください。");
+  }
   let module;
   try {
     module = await WebAssembly.compileStreaming(fetch("ruby.wasm"));

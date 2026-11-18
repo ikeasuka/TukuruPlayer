@@ -100,6 +100,7 @@ enum AppSettings {
         static let showFPS = "display.fps"         // Bool
         static let ignoreSilent = "audio.ignoreSilent" // Bool
         static let gameFonts = "display.gameFonts"  // Bool: load fonts shipped in the game's Fonts folder
+        static let noJIT = "engine.noJIT"          // Bool: run the web content process without JIT
         static let mapping = "controller.mapping"  // JSON
     }
 
@@ -114,6 +115,7 @@ enum AppSettings {
             Key.showFPS: false,
             Key.ignoreSilent: false,
             Key.gameFonts: true,
+            Key.noJIT: false,
         ])
     }
 

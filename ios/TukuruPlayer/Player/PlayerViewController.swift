@@ -56,6 +56,14 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
         config.suppressesIncrementalRendering = false
+        if AppSettings.defaults.bool(forKey: AppSettings.Key.noJIT) {
+            if let pool = Self.noJITProcessPool() {
+                config.processPool = pool
+                log.stage("JIT disabled for the web process")
+            } else {
+                log.stage("JIT setting not supported on this iOS")
+            }
+        }
         webView = WKWebView(frame: view.bounds, configuration: config)
         webView.isOpaque = false
         webView.backgroundColor = .black
@@ -128,6 +136,24 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         applySettings()
         webView.load(URLRequest(url: SchemeHandler.startURL))
         game.markPlayed()
+    }
+
+    /// A process pool whose web content processes run without JIT (private _WKProcessPoolConfiguration).
+    private static var cachedNoJITPool: WKProcessPool?
+    private static func noJITProcessPool() -> WKProcessPool? {
+        if let p = cachedNoJITPool { return p }
+        guard let cfgClass = NSClassFromString("_WKProcessPoolConfiguration") as? NSObject.Type else { return nil }
+        let cfg = cfgClass.init()
+        guard cfg.responds(to: NSSelectorFromString("setJITEnabled:")) else { return nil }
+        cfg.setValue(false, forKey: "JITEnabled")
+        let initSel = NSSelectorFromString("_initWithConfiguration:")
+        guard let allocated = (WKProcessPool.self as AnyObject).perform(NSSelectorFromString("alloc"))?
+                .takeUnretainedValue() as? NSObject,
+              allocated.responds(to: initSel),
+              let pool = allocated.perform(initSel, with: cfg)?.takeUnretainedValue() as? WKProcessPool
+        else { return nil }
+        cachedNoJITPool = pool
+        return pool
     }
 
     /// Game area: full width at the top in portrait (controls go below), centered in landscape.
