@@ -36,6 +36,11 @@ build_one() {   # $1 = sdk (iphoneos|iphonesimulator)
   rm -rf "$src" "$prefix"; mkdir -p "$src"
   tar xzf "$TARBALL" -C "$src" --strip-components 1
   cd "$src"
+  # iOS has no fork/system(): patch the few places that use them unconditionally.
+  # file.c defines its CFString helpers only when fork works, but uses them regardless.
+  perl -0pi -e 's/# ifdef HAVE_WORKING_FORK\nstatic CFMutableStringRef/static CFMutableStringRef/; s/(#   define mutable_CFString_release\(m, s\) \(CFRelease\(m\), CFRelease\(s\)\)\n)/$1\n# ifdef HAVE_WORKING_FORK\n/' file.c
+  perl -0pi -e 's/status = system\(rb_execarg_commandline\(eargp, &prog\)\);/status = -1; (void)prog;/' process.c
+  perl -0pi -e 's/int r = system\(buf\);/int r = -1;/' vm_dump.c
   local cc; cc="$(xcrun --sdk "$sdk" -f clang) -target $target -isysroot $sysroot"
   # iOS has no fork/exec/system: tell configure so process.c compiles without them.
   ./configure --host=aarch64-apple-darwin --target=aarch64-apple-darwin --prefix="$prefix" \
