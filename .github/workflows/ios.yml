@@ -72,7 +72,7 @@ jobs:
         if: failure()
         with:
           name: ruby-ios-logs
-          path: .ruby-ios-build/*.log
+          path: ruby-ios-build/*.log
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate Xcode project

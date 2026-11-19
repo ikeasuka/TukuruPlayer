@@ -8,7 +8,7 @@ set -x
 RUBY_VERSION=${RUBY_VERSION:-3.4.1}
 MINOS=16.0
 OUT=$(cd "${1:-out}" 2>/dev/null && pwd || (mkdir -p "${1:-out}" && cd "${1:-out}" && pwd))
-WORK=${WORK:-$PWD/.ruby-ios-build}
+WORK=${WORK:-$PWD/ruby-ios-build}
 mkdir -p "$WORK"
 cd "$WORK"
 TARBALL=ruby-$RUBY_VERSION.tar.gz
@@ -42,7 +42,7 @@ build_one() {   # $1 = sdk (iphoneos|iphonesimulator)
     > "$WORK/configure-$sdk.log" 2>&1 || { set +x; tail -n 60 "$WORK/configure-$sdk.log"; exit 1; }
   set +x
   make -j"$(sysctl -n hw.ncpu)" libruby-static.a exts encs > "$WORK/make-$sdk.log" 2>&1 \
-    || { grep -E "error:" -B2 -A6 "$WORK/make-$sdk.log" | head -n 120; tail -n 40 "$WORK/make-$sdk.log"; exit 1; }
+    || { set +e; tail -n 80 "$WORK/make-$sdk.log"; echo "----- errors -----"; grep -E "error|Error" -B2 -A6 "$WORK/make-$sdk.log" | head -n 150; exit 1; }
   # One static library: the VM, the statically linked extensions and the encodings.
   local objs=()
   while IFS= read -r f; do objs+=("$f"); done < <(find ext enc -name '*.a' | sort)

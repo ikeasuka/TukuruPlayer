@@ -6,4 +6,4 @@ build/
 web/dev/shot-*.png
 native/linux/runner
 native/ruby-ios/out/
-.ruby-ios-build/
+ruby-ios-build/

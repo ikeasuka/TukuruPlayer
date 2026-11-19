@@ -39,4 +39,4 @@ jobs:
         if: failure()
         with:
           name: ruby-ios-logs
-          path: .ruby-ios-build/*.log
+          path: ruby-ios-build/*.log
