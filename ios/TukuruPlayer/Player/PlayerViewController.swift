@@ -52,6 +52,7 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
 
         fs = GameFileSystem(root: game.url, rtpRoots: GameLibrary.rtpRoots(for: game))
         audio = GameAudio(fs: fs)
+        audio.onProblem = { [weak self] msg in DispatchQueue.main.async { self?.log.add("!! \(msg)") } }
         native = AppSettings.defaults.bool(forKey: AppSettings.Key.nativeEngine)
         if native {
             setupNative()

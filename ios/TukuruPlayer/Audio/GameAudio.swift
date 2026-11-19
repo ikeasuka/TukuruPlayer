@@ -27,6 +27,8 @@ final class GameAudio {
 
     /// Reports the BGM position (in samples) periodically, on the main thread.
     var onBGMPosition: ((Int) -> Void)?
+    /// Problems worth showing in the game log (file not found, decode failure), any thread.
+    var onProblem: ((String) -> Void)?
 
     struct Decoded {
         enum Kind { case pcm(AVAudioPCMBuffer), midi(Data) }
@@ -86,7 +88,10 @@ final class GameAudio {
     private func startEngine() {
         if !engine.isRunning && !paused {
             engine.prepare()
-            do { try engine.start() } catch { NSLog("[TukuruPlayer] audio engine start failed: \(error)") }
+            do { try engine.start() } catch {
+                NSLog("[TukuruPlayer] audio engine start failed: \(error)")
+                onProblem?("audio engine start failed: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -158,11 +163,20 @@ final class GameAudio {
     // MARK: - decoding
 
     private func load(_ name: String) -> Decoded? {
-        guard let item = fs.resolve(name), let data = try? fs.data(for: item) else {
+        guard let item = fs.resolve(name) else {
             NSLog("[TukuruPlayer] audio not found: \(name)")
+            onProblem?("audio not found: \(name)")
             return nil
         }
-        return Self.decode(data, name: item.name)
+        guard let data = try? fs.data(for: item) else {
+            onProblem?("audio read failed: \(item.name)")
+            return nil
+        }
+        guard let d = Self.decode(data, name: item.name) else {
+            onProblem?("audio decode failed: \(item.name) (\(data.count) bytes)")
+            return nil
+        }
+        return d
     }
 
     /// Every buffer is converted to this format so the audio graph never has to be
