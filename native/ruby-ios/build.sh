@@ -52,7 +52,7 @@ build_one() {   # $1 = sdk (iphoneos|iphonesimulator)
     ac_cv_func_getattrlist=no ac_cv_func_fgetattrlist=no \
     > "$WORK/configure-$sdk.log" 2>&1 || { set +x; tail -n 60 "$WORK/configure-$sdk.log"; exit 1; }
   set +x
-  make -j"$(sysctl -n hw.ncpu)" main > "$WORK/make-$sdk.log" 2>&1 \
+  make -k -j"$(sysctl -n hw.ncpu)" main > "$WORK/make-$sdk.log" 2>&1 \
     || { set +e; tail -n 80 "$WORK/make-$sdk.log"; echo "----- errors -----"; grep -E "error|Error" -B2 -A6 "$WORK/make-$sdk.log" | head -n 150; exit 1; }
   # One static library: the VM, the statically linked extensions and the encodings.
   local objs=()
