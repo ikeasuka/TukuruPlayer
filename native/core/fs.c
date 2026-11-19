@@ -86,9 +86,19 @@ static int resolve_in(const char *root, const char *rel, char *out, size_t outle
   char *save = NULL;
   for (char *tok = strtok_r(buf, "/", &save); tok; tok = strtok_r(NULL, "/", &save)) {
     if (!*tok || strcmp(tok, ".") == 0) continue;
+    size_t l = strlen(cur);
+    // Exact name first: the file system itself matches it, including Unicode normalization
+    // differences (APFS treats NFC "ブ" and NFD "フ+゛" as the same name; byte-wise
+    // comparison below would not).
+    char exact[4096];
+    snprintf(exact, sizeof(exact), "%s/%s", cur, tok);
+    struct stat est;
+    if (stat(exact, &est) == 0) {
+      snprintf(cur + l, sizeof(cur) - l, "/%s", tok);
+      continue;
+    }
     const char *real = dir_find(cur, tok, 1);
     if (!real) return 0;
-    size_t l = strlen(cur);
     snprintf(cur + l, sizeof(cur) - l, "/%s", real);
   }
   struct stat st;
