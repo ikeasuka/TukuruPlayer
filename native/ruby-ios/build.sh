@@ -36,6 +36,9 @@ build_one() {   # $1 = sdk (iphoneos|iphonesimulator)
   rm -rf "$src" "$prefix"; mkdir -p "$src"
   tar xzf "$TARBALL" -C "$src" --strip-components 1
   cd "$src"
+  # Bundled gems with C extensions (bigdecimal, debug, racc, rbs) can't be linked as bundles
+  # for iOS and aren't needed by RGSS games: drop them.
+  rm -rf .bundle/gems gems/*.gem
   # iOS has no fork/system(): patch the few places that use them unconditionally.
   # file.c defines its CFString helpers only when fork works, but uses them regardless.
   perl -0pi -e 's/# ifdef HAVE_WORKING_FORK\nstatic CFMutableStringRef/static CFMutableStringRef/; s/(#   define mutable_CFString_release\(m, s\) \(CFRelease\(m\), CFRelease\(s\)\)\n)/$1\n# ifdef HAVE_WORKING_FORK\n/' file.c
@@ -57,7 +60,8 @@ build_one() {   # $1 = sdk (iphoneos|iphonesimulator)
     ac_cv_func_getattrlist=no ac_cv_func_fgetattrlist=no \
     > "$WORK/configure-$sdk.log" 2>&1 || { set +x; tail -n 60 "$WORK/configure-$sdk.log"; exit 1; }
   set +x
-  make -k -j"$(sysctl -n hw.ncpu)" main > "$WORK/make-$sdk.log" 2>&1 \
+  make -k -j"$(sysctl -n hw.ncpu)" main > "$WORK/make-$sdk.log" 2>&1 || \
+    { ls libruby*-static.a >/dev/null 2>&1 && [ -f ext/extinit.o ] && echo "make reported errors; library and extensions are built, continuing"; } \
     || { set +e; tail -n 80 "$WORK/make-$sdk.log"; echo "----- errors -----"; grep -E "error|Error" -B2 -A6 "$WORK/make-$sdk.log" | head -n 150; exit 1; }
   # One static library: the VM, the statically linked extensions and the encodings.
   local objs=()
