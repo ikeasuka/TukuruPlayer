@@ -159,6 +159,31 @@ final class GameFileSystem {
         return (try? JSONSerialization.data(withJSONObject: info)) ?? Data("{}".utf8)
     }
 
+    // MARK: native engine
+
+    /// Write the files of the encrypted archive (Game.rgss3a ...) into the game folder, so the
+    /// native engine can read them as ordinary files. Existing files are kept (they override
+    /// the archive, as in RGSS). Returns the number of files written.
+    @discardableResult
+    func extractArchive() -> Int {
+        guard let a = archive else { return 0 }
+        let fm = FileManager.default
+        let marker = root.appendingPathComponent(".tkr_extracted")
+        if fm.fileExists(atPath: marker.path) { return 0 }
+        var written = 0
+        for (_, e) in a.entries {
+            let parts = GameImporter.safeComponents(e.name)
+            guard !parts.isEmpty else { continue }
+            let url = GameImporter.safeJoin(root, parts)
+            if fm.fileExists(atPath: url.path) { continue }
+            guard let data = try? a.data(for: e) else { continue }
+            try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if (try? data.write(to: url)) != nil { written += 1 }
+        }
+        try? Data().write(to: marker)
+        return written
+    }
+
     // MARK: saves
 
     private func safeURL(_ rel: String) -> URL? {

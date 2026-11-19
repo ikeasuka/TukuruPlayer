@@ -56,6 +56,23 @@ jobs:
         working-directory: tools/ImportTests
         run: swift test 2>&1 | tail -n 60
         shell: bash -o pipefail {0}
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4.1"
+      - name: Restore Ruby.xcframework
+        id: rubycache
+        uses: actions/cache@v4
+        with:
+          path: native/ruby-ios/out
+          key: ruby-ios-${{ hashFiles('native/ruby-ios/build.sh') }}
+      - name: Build Ruby.xcframework (CRuby for iOS)
+        if: steps.rubycache.outputs.cache-hit != 'true'
+        run: native/ruby-ios/build.sh native/ruby-ios/out
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ruby-ios-logs
+          path: .ruby-ios-build/*.log
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate Xcode project

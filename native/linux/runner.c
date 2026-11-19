@@ -5,6 +5,7 @@
 #include "../core/tkr.h"
 #include "../core/tkr_engine.h"
 #include "../core/tkr_platform.h"
+#include "../core/tkr_fs.h"
 #include <ruby.h>
 #include <ctype.h>
 #include <dirent.h>
@@ -33,57 +34,9 @@ static double now(void) {
   return ts.tv_sec + ts.tv_nsec / 1e9;
 }
 
-// ---- files: case-insensitive resolution inside the game folder ----------------------
-static int ci_component(const char *dir, const char *name, char *out, size_t outlen) {
-  DIR *d = opendir(dir);
-  if (!d) return 0;
-  struct dirent *e;
-  int found = 0;
-  while ((e = readdir(d))) {
-    if (strcasecmp(e->d_name, name) == 0) {
-      snprintf(out, outlen, "%s/%s", dir, e->d_name);
-      found = 1;
-      break;
-    }
-  }
-  closedir(d);
-  return found;
-}
-
-static int ci_path(const char *rel, char *out, size_t outlen) {
-  char cur[2048];
-  snprintf(cur, sizeof(cur), "%s", g_game);
-  char buf[2048];
-  snprintf(buf, sizeof(buf), "%s", rel);
-  for (char *p = buf; *p; p++) if (*p == '\\') *p = '/';
-  char *save = NULL;
-  for (char *tok = strtok_r(buf, "/", &save); tok; tok = strtok_r(NULL, "/", &save)) {
-    if (strcmp(tok, ".") == 0 || !*tok) continue;
-    char next[2048];
-    if (!ci_component(cur, tok, next, sizeof(next))) return 0;
-    snprintf(cur, sizeof(cur), "%s", next);
-  }
-  snprintf(out, outlen, "%s", cur);
-  return 1;
-}
-
+// ---- files ----------------------------------------------------------------------------
 int tkr_platform_resolve(const char *rel, const char *const *exts, char *out, size_t outlen) {
-  if (!rel || !*rel) return 0;
-  if (rel[0] == '/') {  // absolute: accept as is if it exists
-    struct stat st;
-    if (stat(rel, &st) == 0) { snprintf(out, outlen, "%s", rel); return 1; }
-    return 0;
-  }
-  if (ci_path(rel, out, outlen)) {
-    struct stat st;
-    if (stat(out, &st) == 0 && S_ISREG(st.st_mode)) return 1;
-  }
-  for (int i = 0; exts && exts[i]; i++) {
-    char with[2048];
-    snprintf(with, sizeof(with), "%s%s", rel, exts[i]);
-    if (ci_path(with, out, outlen)) return 1;
-  }
-  return 0;
+  return tkr_fs_resolve(rel, exts, out, outlen);
 }
 
 // ---- text (stb_truetype) ----------------------------------------------------------------
@@ -243,6 +196,7 @@ int main(int argc, char **argv) {
   }
   setvbuf(stdout, NULL, _IOLBF, 0);
   load_font(font);
+  tkr_fs_set_roots(g_game, NULL, 0);
   g_t0 = now();
   // RGSS games may nest deeply (Windows RGSS allows >10000 calls); Ruby's default is ~1MB.
   setenv("RUBY_THREAD_VM_STACK_SIZE", "4194304", 1);

@@ -104,7 +104,11 @@ static VALUE native_call(int argc, VALUE *argv, VALUE self) {
     tkr_render(l, n);
     return Qnil;
   }
-  if (name == id_frame) return rb_str_new_cstr(tkr_platform_frame() ? "reset" : "");
+  if (name == id_frame) {
+    int r = tkr_platform_frame();
+    if (r == 2) rb_funcall(rb_mKernel, rb_intern("exit"), 0);  // host closed the game: SystemExit
+    return rb_str_new_cstr(r ? "reset" : "");
+  }
   if (name == id_inputUpdate) {
     int o[5];
     tkr_input_update(o);
@@ -311,6 +315,7 @@ static const char *PRELUDE =
 
 int tkr_engine_run(const TkrEngineConfig *cfg) {
   tkr_render_init(544, 416);
+  tkr_render_unfreeze();
   if (chdir(cfg->game_dir) != 0) {
     tkr_platform_event("error", "Cannot open the game folder");
     return 1;

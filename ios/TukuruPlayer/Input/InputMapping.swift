@@ -102,6 +102,7 @@ enum AppSettings {
         static let gameFonts = "display.gameFonts"  // Bool: load fonts shipped in the game's Fonts folder
         static let noJIT = "engine.noJIT"          // Bool: run the web content process without JIT
         static let rubyVersion = "engine.ruby"     // "3.4" | "3.4-opt" | "3.3"
+        static let nativeEngine = "engine.native"  // Bool: native engine (CRuby) instead of WebKit
         static let mapping = "controller.mapping"  // JSON
     }
 
@@ -118,6 +119,7 @@ enum AppSettings {
             Key.gameFonts: true,
             Key.noJIT: true,
             Key.rubyVersion: "3.4",
+            Key.nativeEngine: true,
         ])
     }
 

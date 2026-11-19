@@ -32,7 +32,7 @@ void tkr_platform_log(const char *level, const char *msg);
 
 // Called once per Graphics.update after the frame was composed (tkr_render_output()).
 // Presents the frame and blocks until it is time for the next one. Returns 1 when the user
-// asked for a reset (F12), 0 otherwise.
+// asked for a reset (F12), 2 when the game must quit (raises SystemExit), 0 otherwise.
 int tkr_platform_frame(void);
 void tkr_platform_set_frame_rate(int fps);
 

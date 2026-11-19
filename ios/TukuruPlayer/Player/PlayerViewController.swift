@@ -9,7 +9,10 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
     let game: GameEntry
     var onClose: (() -> Void)?
 
-    private var webView: WKWebView!
+    private var webView: WKWebView?
+    /// Native engine: the composed frames are shown as this view's layer contents.
+    private let gameView = UIView()
+    private var native = false
     private var fs: GameFileSystem!
     private var schemeHandler: SchemeHandler!
     private var audio: GameAudio!
@@ -49,6 +52,17 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
 
         fs = GameFileSystem(root: game.url, rtpRoots: GameLibrary.rtpRoots(for: game))
         audio = GameAudio(fs: fs)
+        native = AppSettings.defaults.bool(forKey: AppSettings.Key.nativeEngine)
+        if native {
+            setupNative()
+        } else {
+            setupWeb()
+        }
+        setupControls()
+        game.markPlayed()
+    }
+
+    private func setupWeb() {
         schemeHandler = SchemeHandler(fs: fs)
 
         let config = WKWebViewConfiguration()
@@ -68,7 +82,8 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
             log.stage("JIT enabled")
         }
         log.stage("ruby engine: \(AppSettings.defaults.string(forKey: AppSettings.Key.rubyVersion) ?? "3.4")")
-        webView = WKWebView(frame: view.bounds, configuration: config)
+        let webView = WKWebView(frame: view.bounds, configuration: config)
+        self.webView = webView
         webView.isOpaque = false
         webView.backgroundColor = .black
         webView.scrollView.backgroundColor = .black
@@ -82,11 +97,47 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         if #available(iOS 16.4, *) { webView.isInspectable = true }
         #endif
         view.addSubview(webView)
+        addTapRecognizer(to: webView)
+        audio.onBGMPosition = { [weak self] pos in
+            self?.webView?.evaluateJavaScript("window.TKRNative&&TKRNative.bgmPos(\(pos))", completionHandler: nil)
+        }
+        webView.load(URLRequest(url: SchemeHandler.startURL))
+    }
+
+    /// Native engine: CRuby + native/core render into gameView (no WebKit, no JIT needed).
+    private func setupNative() {
+        log.stage("engine: native")
+        gameView.backgroundColor = .black
+        gameView.layer.contentsGravity = .resize
+        gameView.layer.magnificationFilter = .nearest
+        view.addSubview(gameView)
+        addTapRecognizer(to: gameView)
+        audio.onBGMPosition = { pos in NativeEngine.shared.setBGMPosition(pos) }
+        let fs = self.fs!
+        let game = self.game
+        let rtp = GameLibrary.rtpRoots(for: game)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let n = fs.extractArchive()
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.closed else { return }
+                if n > 0 { self.log.stage("archive extracted: \(n) files") }
+                NativeEngine.shared.registerFonts(in: [game.url] + rtp)
+                self.nativeSession = NativeEngine.shared.start(gameDir: game.url, engine: game.engine, rtp: rtp, host: self)
+            }
+        }
+    }
+
+    private var nativeSession = 0
+
+    private func addTapRecognizer(to v: UIView) {
         // touching the game screen reveals the menu button
         let tap = UITapGestureRecognizer(target: self, action: #selector(gameTapped))
         tap.cancelsTouchesInView = false
         tap.delegate = self
-        webView.addGestureRecognizer(tap)
+        v.addGestureRecognizer(tap)
+    }
+
+    private func setupControls() {
 
         pad.frame = view.bounds
         pad.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -122,10 +173,6 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         }
         controllers.onConnectionChange = { [weak self] _ in self?.applyPadVisibility() }
 
-        audio.onBGMPosition = { [weak self] pos in
-            self?.webView.evaluateJavaScript("window.TKRNative&&TKRNative.bgmPos(\(pos))", completionHandler: nil)
-        }
-
         let nc = NotificationCenter.default
         observers.append(nc.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             self?.setPaused(true)
@@ -139,8 +186,6 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         })
 
         applySettings()
-        webView.load(URLRequest(url: SchemeHandler.startURL))
-        game.markPlayed()
     }
 
     /// A process pool whose web content processes run without JIT (private _WKProcessPoolConfiguration).
@@ -188,7 +233,9 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
             if w > safe.width { w = safe.width; h = (w / aspect).rounded() }
             game = CGRect(x: (b.width - w) / 2, y: safe.minY + (h0 - h) / 2, width: w, height: h)
         }
-        if webView.frame != game {
+        if native {
+            if gameView.frame != game { gameView.frame = game }
+        } else if let webView, webView.frame != game {
             webView.frame = game
             // WKWebView doesn't always fire 'resize' when only its frame changes (e.g. on rotation).
             webView.evaluateJavaScript("window.dispatchEvent(new Event('resize'))", completionHandler: nil)
@@ -254,6 +301,7 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         pad.padScale = CGFloat(max(0.6, d.double(forKey: AppSettings.Key.padScale)))
         controllers.reloadMapping()
         applyPadVisibility()
+        gameView.layer.magnificationFilter = d.bool(forKey: AppSettings.Key.smooth) ? .linear : .nearest
         if let json = try? JSONSerialization.data(withJSONObject: AppSettings.webSettings),
            let s = String(data: json, encoding: .utf8) {
             webView?.evaluateJavaScript("window.TKRNative&&TKRNative.settings(\(s))", completionHandler: nil)
@@ -279,12 +327,14 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         let m = padMask | controllerMask
         guard m != lastSentMask else { return }
         lastSentMask = m
-        webView.evaluateJavaScript("window.TKRNative&&TKRNative.input(\(m))", completionHandler: nil)
+        if native { tkr_input_set_mask(m); return }
+        webView?.evaluateJavaScript("window.TKRNative&&TKRNative.input(\(m))", completionHandler: nil)
     }
 
     private func setPaused(_ p: Bool) {
         audio.setPaused(p)
-        webView.evaluateJavaScript("window.TKRNative&&TKRNative.pause(\(p))", completionHandler: nil)
+        if native { if nativeSession == NativeEngine.shared.session { NativeEngine.shared.paused = p }; return }
+        webView?.evaluateJavaScript("window.TKRNative&&TKRNative.pause(\(p))", completionHandler: nil)
     }
 
     // MARK: pause menu
@@ -318,7 +368,8 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
             hidePauseMenu()
         case .reset:
             hidePauseMenu()
-            webView.evaluateJavaScript("window.TKRNative&&TKRNative.reset()", completionHandler: nil)
+            if native { NativeEngine.shared.requestReset(); return }
+            webView?.evaluateJavaScript("window.TKRNative&&TKRNative.reset()", completionHandler: nil)
         case .togglePad:
             let showing = !pad.isHidden
             AppSettings.defaults.set(showing ? "never" : "always", forKey: AppSettings.Key.padMode)
@@ -337,8 +388,12 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         controllers.menuHandler = nil
         log.endSession()
         audio.shutdown()
-        webView.configuration.userContentController.removeScriptMessageHandler(forName: "tkr")
-        webView.stopLoading()
+        if native {
+            if nativeSession == NativeEngine.shared.session { NativeEngine.shared.stop() }
+        } else {
+            webView?.configuration.userContentController.removeScriptMessageHandler(forName: "tkr")
+            webView?.stopLoading()
+        }
         dismiss(animated: true) { [onClose] in onClose?() }
     }
 
@@ -440,6 +495,60 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         let alert = UIAlertController(title: game.title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler() })
         present(alert, animated: true)
+    }
+}
+
+// MARK: - native engine host
+
+extension PlayerViewController: NativeEngineHost {
+    func nativePresent(_ image: CGImage) {
+        gameView.layer.contents = image
+    }
+
+    func nativeEvent(_ name: String, _ text: String) {
+        switch name {
+        case "stage": log.stage(text)
+        case "log": log.add(text)
+        case "ready": break
+        case "exit": close()
+        case "resolution":
+            let p = text.split(separator: "x").compactMap { Int($0) }
+            if p.count == 2, p[0] > 0, p[1] > 0 {
+                gameSize = CGSize(width: p[0], height: p[1])
+                view.setNeedsLayout()
+            }
+        case "error":
+            log.add("ERROR \(text)")
+            showNativeError(text)
+        default: break
+        }
+    }
+
+    func nativeMessageBox(_ text: String, done: @escaping () -> Void) {
+        let alert = UIAlertController(title: game.title, message: text, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in done() })
+        (presentedViewController ?? self).present(alert, animated: true)
+    }
+
+    func nativeAudio(_ op: String, _ args: [Any]) {
+        log.add("audio \(op) \(args.map { "\($0)" }.joined(separator: ","))")
+        audio.handle(op: op, args: args)
+    }
+
+    func nativeGameEnded() {
+        if !closed { close() }
+    }
+
+    private func showNativeError(_ text: String) {
+        let parts = text.split(separator: "\n", maxSplits: 1).map(String.init)
+        let alert = UIAlertController(title: parts.first ?? "エラー", message: parts.count > 1 ? parts[1] : "",
+                                      preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "ログを共有", style: .default) { [weak self] _ in
+            self?.shareLog(afterCrash: false)
+        })
+        alert.addAction(UIAlertAction(title: "閉じる", style: .cancel))
+        alert.addAction(UIAlertAction(title: "ライブラリに戻る", style: .destructive) { [weak self] _ in self?.close() })
+        (presentedViewController ?? self).present(alert, animated: true)
     }
 }
 

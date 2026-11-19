@@ -39,7 +39,8 @@ build_one() {   # $1 = sdk (iphoneos|iphonesimulator)
     ac_cv_func_posix_spawn=no ac_cv_func_posix_spawnp=no ac_cv_func_daemon=no \
     ac_cv_func_syscall=no ac_cv_func___syscall=no ac_cv_func_getentropy=no \
     ac_cv_func_sendfile=no ac_cv_func_setpgrp=no ac_cv_func_setsid=no \
-    > "$WORK/configure-$sdk.log" 2>&1 || { tail -n 60 "$WORK/configure-$sdk.log"; exit 1; }
+    > "$WORK/configure-$sdk.log" 2>&1 || { set +x; tail -n 60 "$WORK/configure-$sdk.log"; exit 1; }
+  set +x
   make -j"$(sysctl -n hw.ncpu)" libruby-static.a exts encs > "$WORK/make-$sdk.log" 2>&1 \
     || { grep -E "error:" -B2 -A6 "$WORK/make-$sdk.log" | head -n 120; tail -n 40 "$WORK/make-$sdk.log"; exit 1; }
   # One static library: the VM, the statically linked extensions and the encodings.
@@ -55,7 +56,6 @@ build_one() {   # $1 = sdk (iphoneos|iphonesimulator)
   cd "$WORK"
 }
 
-set +x
 build_one iphoneos
 build_one iphonesimulator
 rm -rf "$OUT/Ruby.xcframework"

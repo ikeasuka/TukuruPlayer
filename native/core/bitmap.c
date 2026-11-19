@@ -151,6 +151,10 @@ void tkr_bmp_dispose(int id) {
   g_bmps[id] = NULL;
 }
 
+void tkr_bmp_dispose_all(void) {
+  for (int i = 1; i < g_cap; i++) if (g_bmps[i]) tkr_bmp_dispose(i);
+}
+
 size_t tkr_bmp_memory(void) { return g_bytes; }
 int tkr_bmp_count(void) { return g_count; }
 

@@ -17,6 +17,7 @@ struct SettingsView: View {
     @AppStorage(AppSettings.Key.gameFonts) private var gameFonts = true
     @AppStorage(AppSettings.Key.noJIT) private var noJIT = true
     @AppStorage(AppSettings.Key.rubyVersion) private var rubyVersion = "3.4"
+    @AppStorage(AppSettings.Key.nativeEngine) private var nativeEngine = true
 
     @State private var mapping = AppSettings.mapping
     @State private var rtpTarget: Int?
@@ -96,6 +97,14 @@ struct SettingsView: View {
                     Text("RTP（ランタイムパッケージ）")
                 } footer: {
                     Text("RTP を必要とするゲームでは、PC にインストールされた RTP フォルダ（Graphics / Audio を含むフォルダ）を読み込んでください。")
+                }
+
+                Section {
+                    Toggle("ネイティブエンジンを使う（推奨）", isOn: $nativeEngine)
+                } header: {
+                    Text("エンジン")
+                } footer: {
+                    Text("オン: iPhone 上で直接 Ruby を動かします（高速・安定）。オフ: 以前の Web 版エンジンを使います（下の設定はこちら用）。")
                 }
 
                 Section {

@@ -24,6 +24,7 @@ int tkr_bmp_load(const char *path);                // game-relative path, no ext
 int tkr_bmp_from_pixels(int w, int h, const uint8_t *rgba);
 int tkr_bmp_dup(int id);
 void tkr_bmp_dispose(int id);
+void tkr_bmp_dispose_all(void);                    // between games
 TkrBitmap *tkr_bmp_get(int id);                    // NULL if unknown
 size_t tkr_bmp_memory(void);                       // bytes held by live bitmaps
 int tkr_bmp_count(void);

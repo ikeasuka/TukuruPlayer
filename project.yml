@@ -29,8 +29,22 @@ targets:
       - path: ios/TukuruPlayer/WebRuntime
         type: folder
         buildPhase: resources
+      # native engine (C core + embedded CRuby); always optimized, even in Debug
+      - path: native/core
+        excludes:
+          - "third_party/**"
+        compilerFlags: "-O3 -w"
+      - path: native/ios
+        compilerFlags: "-O3 -w"
+      # RGSS runtime sources (Ruby), loaded by the native engine at startup
+      - path: web/rgss
+        type: folder
+        buildPhase: resources
     dependencies:
       - package: ZIPFoundation
+      - framework: native/ruby-ios/out/Ruby.xcframework
+        embed: false
+      - sdk: libz.tbd
     settings:
       base:
         # Use the hand-written Info.plist as is. (XcodeGen's `info:` option regenerates the file
