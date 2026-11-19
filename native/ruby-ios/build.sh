@@ -17,6 +17,16 @@ TARBALL=ruby-$RUBY_VERSION.tar.gz
 # Extensions that need libraries iOS doesn't have, or processes (fork) iOS forbids.
 WITHOUT_EXT="openssl,fiddle,psych,pty,readline,gdbm,dbm,syslog,win32,win32ole,nkf,objspace,-test-,io/console/win32"
 
+# Headers macOS has but the iOS SDK lacks (included unconditionally under __APPLE__).
+STUBS="$WORK/ios-stubs"
+mkdir -p "$STUBS/sys"
+cat > "$STUBS/sys/vnode.h" <<'H'
+#ifndef TKR_STUB_SYS_VNODE_H
+#define TKR_STUB_SYS_VNODE_H
+enum vtype { VNON, VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD, VSTR, VCPLX };
+#endif
+H
+
 build_one() {   # $1 = sdk (iphoneos|iphonesimulator)
   local sdk=$1
   local sysroot; sysroot=$(xcrun --sdk "$sdk" --show-sdk-path)
@@ -33,12 +43,13 @@ build_one() {   # $1 = sdk (iphoneos|iphonesimulator)
     --disable-jit-support --disable-yjit --disable-rjit --without-gmp --disable-dln \
     --with-out-ext="$WITHOUT_EXT" --with-baseruby="$(command -v ruby)" \
     CC="$cc" CXX="$(xcrun --sdk "$sdk" -f clang++) -target $target -isysroot $sysroot" \
-    CFLAGS="-O2 -fno-common" LDFLAGS="" \
+    CFLAGS="-O2 -fno-common" CPPFLAGS="-I$STUBS" LDFLAGS="" \
     ac_cv_func_fork=no ac_cv_func_fork_works=no ac_cv_func_vfork=no ac_cv_func_vfork_works=no \
     ac_cv_func_system=no ac_cv_func_execv=no ac_cv_func_execve=no ac_cv_func_execl=no \
     ac_cv_func_posix_spawn=no ac_cv_func_posix_spawnp=no ac_cv_func_daemon=no \
     ac_cv_func_syscall=no ac_cv_func___syscall=no ac_cv_func_getentropy=no \
     ac_cv_func_sendfile=no ac_cv_func_setpgrp=no ac_cv_func_setsid=no \
+    ac_cv_func_getattrlist=no ac_cv_func_fgetattrlist=no \
     > "$WORK/configure-$sdk.log" 2>&1 || { set +x; tail -n 60 "$WORK/configure-$sdk.log"; exit 1; }
   set +x
   make -j"$(sysctl -n hw.ncpu)" main > "$WORK/make-$sdk.log" 2>&1 \
