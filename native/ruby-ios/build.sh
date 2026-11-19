@@ -41,14 +41,15 @@ build_one() {   # $1 = sdk (iphoneos|iphonesimulator)
     ac_cv_func_sendfile=no ac_cv_func_setpgrp=no ac_cv_func_setsid=no \
     > "$WORK/configure-$sdk.log" 2>&1 || { set +x; tail -n 60 "$WORK/configure-$sdk.log"; exit 1; }
   set +x
-  make -j"$(sysctl -n hw.ncpu)" libruby-static.a exts encs > "$WORK/make-$sdk.log" 2>&1 \
+  make -j"$(sysctl -n hw.ncpu)" main > "$WORK/make-$sdk.log" 2>&1 \
     || { set +e; tail -n 80 "$WORK/make-$sdk.log"; echo "----- errors -----"; grep -E "error|Error" -B2 -A6 "$WORK/make-$sdk.log" | head -n 150; exit 1; }
   # One static library: the VM, the statically linked extensions and the encodings.
   local objs=()
   while IFS= read -r f; do objs+=("$f"); done < <(find ext enc -name '*.a' | sort)
   [ -f ext/extinit.o ] && objs+=(ext/extinit.o)
   [ -f enc/encinit.o ] && objs+=(enc/encinit.o)
-  xcrun libtool -static -o "$WORK/libruby-$sdk.a" libruby-static.a "${objs[@]}" 2>/dev/null
+  local lib; lib=$(ls libruby*-static.a | head -n 1)
+  xcrun libtool -static -o "$WORK/libruby-$sdk.a" "$lib" "${objs[@]}" 2>/dev/null
   mkdir -p "$WORK/headers-$sdk"
   cp -R include/ruby include/ruby.h "$WORK/headers-$sdk/"
   cp .ext/include/*/ruby/config.h "$WORK/headers-$sdk/ruby/config.h"
