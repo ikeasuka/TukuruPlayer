@@ -216,6 +216,8 @@ final class NativeEngine {
             font = t
         }
         fontCache[key] = font
+        let chosen = CTFontCopyFullName(font) as String
+        tkr_platform_event_swift("stage", "font \(names.joined(separator: "|")) \(size)px -> \(chosen)")
         return font
     }
 
@@ -240,6 +242,10 @@ final class NativeEngine {
         }
         return Double(width)
     }
+}
+
+private func tkr_platform_event_swift(_ name: String, _ text: String) {
+    DispatchQueue.main.async { NativeEngine.shared.host?.nativeEvent(name, text) }
 }
 
 // MARK: - C platform functions (native/core/tkr_platform.h)
