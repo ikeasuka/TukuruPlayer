@@ -69,6 +69,13 @@ build_one() {   # $1 = sdk (iphoneos|iphonesimulator)
   [ -f ext/extinit.o ] && objs+=(ext/extinit.o)
   [ -f enc/encinit.o ] && objs+=(enc/encinit.o)
   local lib; lib=$(ls libruby*-static.a | head -n 1)
+  # libruby-static.a carries no-op Init_enc / Init_ext stubs (dmyenc.o / dmyext.o) for miniruby;
+  # with them in the same archive the linker may pick the stubs instead of encinit.o /
+  # extinit.o, leaving encodings (Encoding::UTF_8) and extensions (zlib) unregistered.
+  cp "$lib" "$WORK/libruby-core-$sdk.a"
+  ar -t "$WORK/libruby-core-$sdk.a" | grep -E "^dmy(enc|ext)\.o$" || true
+  xcrun ar -d "$WORK/libruby-core-$sdk.a" dmyenc.o dmyext.o 2>/dev/null || true
+  lib="$WORK/libruby-core-$sdk.a"
   xcrun libtool -static -o "$WORK/libruby-$sdk.a" "$lib" "${objs[@]}" 2>/dev/null
   mkdir -p "$WORK/headers-$sdk"
   cp -R include/ruby include/ruby.h "$WORK/headers-$sdk/"
