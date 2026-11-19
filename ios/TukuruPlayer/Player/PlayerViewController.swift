@@ -302,6 +302,7 @@ final class PlayerViewController: GCEventViewController, WKScriptMessageHandler,
         controllers.reloadMapping()
         applyPadVisibility()
         gameView.layer.magnificationFilter = d.bool(forKey: AppSettings.Key.smooth) ? .linear : .nearest
+        tkr_text_set_scale(d.double(forKey: AppSettings.Key.textScale))
         if let json = try? JSONSerialization.data(withJSONObject: AppSettings.webSettings),
            let s = String(data: json, encoding: .utf8) {
             webView?.evaluateJavaScript("window.TKRNative&&TKRNative.settings(\(s))", completionHandler: nil)

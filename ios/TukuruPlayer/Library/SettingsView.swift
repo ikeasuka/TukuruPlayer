@@ -18,6 +18,7 @@ struct SettingsView: View {
     @AppStorage(AppSettings.Key.noJIT) private var noJIT = true
     @AppStorage(AppSettings.Key.rubyVersion) private var rubyVersion = "3.4"
     @AppStorage(AppSettings.Key.nativeEngine) private var nativeEngine = true
+    @AppStorage(AppSettings.Key.textScale) private var textScale = 0.75
 
     @State private var mapping = AppSettings.mapping
     @State private var rtpTarget: Int?
@@ -74,6 +75,12 @@ struct SettingsView: View {
                     }
                     Toggle("FPS を表示", isOn: $showFPS)
                     Toggle("ゲーム付属のフォントを使う", isOn: $gameFonts)
+                    VStack(alignment: .leading) {
+                        Text("文字の大きさ \(Int((textScale * 100).rounded()))%")
+                        Slider(value: $textScale, in: 0.5...1.1, step: 0.01)
+                        Text("文字がウィンドウからはみ出す場合は小さくしてください（ネイティブエンジン、ゲーム中も反映）。")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
                 }
 
                 Section {

@@ -407,6 +407,9 @@ void tkr_bmp_radial_blur(int id, int angle, int division) {
 }
 
 // ---- text ---------------------------------------------------------------------------
+static double g_text_scale = 0.75;
+void tkr_text_set_scale(double s) { if (s >= 0.3 && s <= 1.5) g_text_scale = s; }
+
 typedef struct FontSpec {
   TkrFont f;
   char namebuf[512];
@@ -453,8 +456,8 @@ static void parse_spec(const char *spec, FontSpec *fs) {
   parse_rgba(n > 6 ? fields[6] : NULL, fs->color);
   parse_rgba(n > 7 ? fields[7] : NULL, fs->out);
   // RGSS (GDI) renders "size N" smaller than an N px font. The web runtime uses 0.9 (as mkxp);
-  // with CoreText on device that still overflowed windows, so the native engine uses 0.81.
-  fs->f.px = round(fs->size * 0.81 * 10) / 10;
+  // on device the right factor depends on the font, so it is a user setting (tkr_text_set_scale).
+  fs->f.px = round(fs->size * g_text_scale * 10) / 10;
 }
 
 int tkr_text_width(const char *spec, const char *utf8) {

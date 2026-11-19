@@ -44,6 +44,7 @@ void tkr_bmp_radial_blur(int id, int angle, int division);
 // spec: "name1|name2;size;bold;italic;outline;shadow;r,g,b,a;r,g,b,a" (Font#__spec)
 void tkr_bmp_draw_text(int id, int x, int y, int w, int h, const char *utf8, int align, const char *spec);
 int tkr_text_width(const char *spec, const char *utf8);
+void tkr_text_set_scale(double scale);             // font px = RGSS size * scale
 
 // ---- tables (map data / flags) -------------------------------------------------------
 void tkr_table_set(int id, const int16_t *data, int xs, int ys, int zs);

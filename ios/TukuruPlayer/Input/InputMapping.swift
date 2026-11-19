@@ -103,6 +103,7 @@ enum AppSettings {
         static let noJIT = "engine.noJIT"          // Bool: run the web content process without JIT
         static let rubyVersion = "engine.ruby"     // "3.4" | "3.4-opt" | "3.3"
         static let nativeEngine = "engine.native"  // Bool: native engine (CRuby) instead of WebKit
+        static let textScale = "display.textScale" // Double: font px = RGSS font size * this
         static let mapping = "controller.mapping"  // JSON
     }
 
@@ -120,6 +121,7 @@ enum AppSettings {
             Key.noJIT: true,
             Key.rubyVersion: "3.4",
             Key.nativeEngine: true,
+            Key.textScale: 0.75,
         ])
     }
 

@@ -15,6 +15,7 @@ void tkr_input_set_mask(uint32_t mask);
 const uint8_t *tkr_render_output(void);
 int tkr_render_width(void);
 int tkr_render_height(void);
+void tkr_text_set_scale(double scale);
 
 #ifdef __cplusplus
 }
