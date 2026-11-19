@@ -129,3 +129,50 @@ int tkr_fs_resolve(const char *rel, const char *const *exts, char *out, size_t o
   }
   return 0;
 }
+
+// Diagnostics for a failed lookup: log names in the same folder that look similar (same first
+// character or same last 6 bytes), to tell missing files from naming differences.
+void tkr_fs_log_similar(const char *rel, void (*logf)(const char *, const char *)) {
+  if (!rel || g_nroots == 0) return;
+  char dir[2048], base[1024];
+  const char *slash = strrchr(rel, '/');
+  if (!slash) return;
+  snprintf(dir, sizeof(dir), "%.*s", (int)(slash - rel), rel);
+  snprintf(base, sizeof(base), "%s", slash + 1);
+  char real[4096];
+  // resolve the folder (case-insensitive)
+  char cur[4096];
+  snprintf(cur, sizeof(cur), "%s", g_roots[0]);
+  char buf[2048];
+  snprintf(buf, sizeof(buf), "%s", dir);
+  char *save = NULL;
+  for (char *tok = strtok_r(buf, "/", &save); tok; tok = strtok_r(NULL, "/", &save)) {
+    const char *r = dir_find(cur, tok, 0);
+    if (!r) return;
+    size_t l = strlen(cur);
+    snprintf(cur + l, sizeof(cur) - l, "/%s", r);
+  }
+  DirCache *d = dir_get(cur);
+  if (!d) return;
+  size_t bl = strlen(base);
+  int n = 0;
+  for (int i = 0; i < d->n && n < 12; i++) {
+    const char *nm = d->names[i];
+    size_t nl = strlen(nm);
+    int same_first = strncmp(nm, base, 3) == 0;
+    const char *dot = strrchr(nm, '.');
+    size_t stem = dot ? (size_t)(dot - nm) : nl;
+    int same_last = bl >= 6 && stem >= 6 && memcmp(nm + stem - 6, base + bl - 6, 6) == 0;
+    if (same_first || same_last) {
+      char hex[64] = {0};
+      for (int k = 0; k < 9 && nm[k]; k++) snprintf(hex + k * 3, 4, "%02x ", (unsigned char)nm[k]);
+      snprintf(real, sizeof(real), "similar file in %s: %s [%s]", dir, nm, hex);
+      logf("info", real);
+      n++;
+    }
+  }
+  if (!n) {
+    snprintf(real, sizeof(real), "no similar file in %s (%d files)", dir, d->n);
+    logf("info", real);
+  }
+}

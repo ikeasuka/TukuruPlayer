@@ -3,6 +3,7 @@
 // global alpha, nearest-neighbour scaling) so both runtimes draw identically.
 #include "tkr.h"
 #include "tkr_platform.h"
+#include "tkr_fs.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -100,7 +101,13 @@ static const char *const IMG_EXTS[] = {".png", ".jpg", ".jpeg", ".bmp", NULL};
 
 int tkr_bmp_load(const char *rel) {
   char path[1024];
-  if (!tkr_platform_resolve(rel, IMG_EXTS, path, sizeof(path))) return 0;
+  if (!tkr_platform_resolve(rel, IMG_EXTS, path, sizeof(path))) {
+    char msg[1200];
+    snprintf(msg, sizeof(msg), "image not found: %s", rel);
+    tkr_platform_log("error", msg);
+    tkr_fs_log_similar(rel, tkr_platform_log);
+    return 0;
+  }
   ImgCache *hit = NULL;
   for (int i = 0; i < IMG_CACHE_N; i++) {
     if (g_img[i].px && strcmp(g_img[i].path, path) == 0) { hit = &g_img[i]; break; }

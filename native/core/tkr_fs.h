@@ -11,6 +11,7 @@ extern "C" {
 void tkr_fs_set_roots(const char *game, const char *const *rtp, int nrtp);
 // See tkr_platform_resolve.
 int tkr_fs_resolve(const char *rel, const char *const *exts, char *out, size_t outlen);
+void tkr_fs_log_similar(const char *rel, void (*logf)(const char *, const char *));
 
 #ifdef __cplusplus
 }
