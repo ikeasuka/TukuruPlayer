@@ -210,7 +210,7 @@ int main(int argc, char **argv) {
     char *rargv[] = {"tkr", "--disable-gems", "-e", "nil", NULL};
     ruby_options(4, rargv);
     ruby_script("tkr");
-    TkrEngineConfig cfg = {g_game, rgss, engine};
+    TkrEngineConfig cfg = {g_game, rgss, engine, getenv("TKR_LOG_STDOUT") != NULL};
     int r = tkr_engine_run(&cfg);
     printf("ENGINE EXIT %d after %d frames\n", r, g_frame);
     return r;

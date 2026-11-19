@@ -74,6 +74,9 @@ build_one() {   # $1 = sdk (iphoneos|iphonesimulator)
   cp -R include/ruby include/ruby.h "$WORK/headers-$sdk/"
   cp .ext/include/*/ruby/config.h "$WORK/headers-$sdk/ruby/config.h"
   echo "built $sdk: $(du -h "$WORK/libruby-$sdk.a" | cut -f1)  (objects: ${#objs[@]})"
+  printf '  %s\n' "${objs[@]}"
+  grep -h "init(" ext/extinit.c 2>/dev/null | head -n 60 || true
+  grep -E "^Failed to configure|failed to configure" -A3 "$WORK/make-$sdk.log" | head -n 40 || true
   cd "$WORK"
 }
 

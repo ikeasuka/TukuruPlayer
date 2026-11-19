@@ -55,7 +55,7 @@ int tkr_ios_run(const char *game_dir, const char *rgss_dir, int engine, const ch
     if (state) rb_set_errinfo(Qnil);
   }
   tkr_fs_set_roots(game_dir, rtp, nrtp);
-  TkrEngineConfig cfg = {game_dir, rgss_dir, engine};
+  TkrEngineConfig cfg = {game_dir, rgss_dir, engine, 1};
   int r = tkr_engine_run(&cfg);
   tkr_bmp_dispose_all();
   return r;

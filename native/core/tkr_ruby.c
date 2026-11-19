@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <zlib.h>
 
 #define NAMES(X) \
   X(bmpCreate) X(bmpLoad) X(bmpW) X(bmpH) X(bmpDispose) X(bmpDup) X(bmpBlt) X(bmpStretch) X(bmpFill) \
@@ -272,11 +273,93 @@ static VALUE native_call(int argc, VALUE *argv, VALUE self) {
   return Qnil;
 }
 
+// ---- Zlib (subset used by RGSS: Scripts.rvdata2, saves) -----------------------------------
+// Provided natively so the engine doesn't depend on Ruby's zlib extension being linked.
+static VALUE zlib_run(VALUE src, int deflating, int level) {
+  StringValue(src);
+  z_stream zs;
+  memset(&zs, 0, sizeof(zs));
+  int r = deflating ? deflateInit(&zs, level) : inflateInit(&zs);
+  if (r != Z_OK) rb_raise(rb_eRuntimeError, "zlib init failed (%d)", r);
+  VALUE out = rb_str_buf_new(RSTRING_LEN(src) * (deflating ? 1 : 4) + 64);
+  zs.next_in = (Bytef *)RSTRING_PTR(src);
+  zs.avail_in = (uInt)RSTRING_LEN(src);
+  char buf[65536];
+  for (;;) {
+    zs.next_out = (Bytef *)buf;
+    zs.avail_out = sizeof(buf);
+    r = deflating ? deflate(&zs, Z_FINISH) : inflate(&zs, Z_NO_FLUSH);
+    rb_str_cat(out, buf, (long)(sizeof(buf) - zs.avail_out));
+    if (r == Z_STREAM_END) break;
+    if (r != Z_OK && !(r == Z_BUF_ERROR && zs.avail_out == 0)) {
+      if (deflating) deflateEnd(&zs); else inflateEnd(&zs);
+      VALUE eZlib = rb_const_get(rb_cObject, rb_intern("Zlib"));
+      VALUE eErr = rb_const_get(eZlib, rb_intern(r == Z_DATA_ERROR ? "DataError" : "BufError"));
+      rb_raise(eErr, "%s", zs.msg ? zs.msg : (r == Z_DATA_ERROR ? "invalid compressed data" : "buffer error"));
+    }
+    if (!deflating && zs.avail_in == 0 && r == Z_BUF_ERROR) break;
+  }
+  if (deflating) deflateEnd(&zs); else inflateEnd(&zs);
+  return out;
+}
+
+static VALUE zlib_inflate(VALUE self, VALUE src) { (void)self; return zlib_run(src, 0, 0); }
+static VALUE zlib_deflate(int argc, VALUE *argv, VALUE self) {
+  (void)self;
+  if (argc < 1) rb_raise(rb_eArgError, "wrong number of arguments");
+  int level = argc > 1 && !NIL_P(argv[1]) ? NUM2INT(argv[1]) : Z_DEFAULT_COMPRESSION;
+  return zlib_run(argv[0], 1, level);
+}
+static VALUE zlib_crc32(int argc, VALUE *argv, VALUE self) {
+  (void)self;
+  unsigned long crc = argc > 1 ? NUM2ULONG(argv[1]) : crc32(0L, Z_NULL, 0);
+  if (argc > 0 && !NIL_P(argv[0])) {
+    StringValue(argv[0]);
+    crc = crc32(crc, (const Bytef *)RSTRING_PTR(argv[0]), (uInt)RSTRING_LEN(argv[0]));
+  }
+  return ULONG2NUM(crc);
+}
+static VALUE zlib_adler32(int argc, VALUE *argv, VALUE self) {
+  (void)self;
+  unsigned long a = argc > 1 ? NUM2ULONG(argv[1]) : adler32(0L, Z_NULL, 0);
+  if (argc > 0 && !NIL_P(argv[0])) {
+    StringValue(argv[0]);
+    a = adler32(a, (const Bytef *)RSTRING_PTR(argv[0]), (uInt)RSTRING_LEN(argv[0]));
+  }
+  return ULONG2NUM(a);
+}
+
+static void install_zlib(void) {
+  if (rb_const_defined(rb_cObject, rb_intern("Zlib"))) return;  // the real extension is loaded
+  VALUE z = rb_define_module("Zlib");
+  VALUE err = rb_define_class_under(z, "Error", rb_eStandardError);
+  rb_define_class_under(z, "DataError", err);
+  rb_define_class_under(z, "BufError", err);
+  VALUE zs = rb_define_class_under(z, "ZStream", rb_cObject);
+  VALUE inf = rb_define_class_under(z, "Inflate", zs);
+  VALUE def = rb_define_class_under(z, "Deflate", zs);
+  rb_define_singleton_method(inf, "inflate", zlib_inflate, 1);
+  rb_define_singleton_method(def, "deflate", zlib_deflate, -1);
+  rb_define_module_function(z, "inflate", zlib_inflate, 1);
+  rb_define_module_function(z, "deflate", zlib_deflate, -1);
+  rb_define_module_function(z, "crc32", zlib_crc32, -1);
+  rb_define_module_function(z, "adler32", zlib_adler32, -1);
+  rb_define_const(z, "BEST_COMPRESSION", INT2FIX(Z_BEST_COMPRESSION));
+  rb_define_const(z, "BEST_SPEED", INT2FIX(Z_BEST_SPEED));
+  rb_define_const(z, "DEFAULT_COMPRESSION", INT2FIX(Z_DEFAULT_COMPRESSION));
+  rb_define_const(z, "NO_COMPRESSION", INT2FIX(Z_NO_COMPRESSION));
+}
+
 void tkr_engine_install(void) {
 #define INIT_ID(n) id_##n = rb_intern(#n);
   NAMES(INIT_ID)
   VALUE m = rb_define_module("TKRNative");
   rb_define_module_function(m, "call", native_call, -1);
+  // Use Ruby's zlib extension when it is linked in, the native subset otherwise.
+  int state = 0;
+  rb_eval_string_protect("begin; require 'zlib' unless ENV['TKR_NO_ZLIB_EXT']; rescue LoadError; end", &state);
+  if (state) rb_set_errinfo(Qnil);
+  install_zlib();
 }
 
 // ---- boot --------------------------------------------------------------------------
@@ -311,7 +394,22 @@ static void report_exception(const char *where) {
 
 static const char *PRELUDE =
   "module JS; class Error < StandardError; end; end\n"
-  "class Object; def await; self; end; end\n";
+  "class Object; def await; self; end; end\n"
+  // $stdout / $stderr go to the host log line by line (there is no console on iOS)
+  "class TKRLogIO\n"
+  "  def initialize(level); @level = level; @buf = +''; end\n"
+  "  def write(*a); s = a.join; @buf << s; while (i = @buf.index(\"\\n\")); TKRNative.call(:log, @level, @buf[0, i]); @buf = @buf[(i + 1)..]; end; s.bytesize; end\n"
+  "  def print(*a); write(*a.map(&:to_s)); nil; end\n"
+  "  def puts(*a); a = [''] if a.empty?; a.flatten.each { |x| s = x.to_s; write(s.end_with?(\"\\n\") ? s : s + \"\\n\") }; nil; end\n"
+  "  def <<(s); write(s.to_s); self; end\n"
+  "  def flush; self; end\n"
+  "  def sync; true; end\n"
+  "  def sync=(v); end\n"
+  "  def fileno; nil; end\n"
+  "  def tty?; false; end\n"
+  "end\n"
+  "$stdout = TKRLogIO.new('info') if $TKR_LOG_STDOUT\n"
+  "$stderr = TKRLogIO.new('error') if $TKR_LOG_STDOUT\n";
 
 int tkr_engine_run(const TkrEngineConfig *cfg) {
   tkr_render_init(544, 416);
@@ -323,7 +421,8 @@ int tkr_engine_run(const TkrEngineConfig *cfg) {
   tkr_engine_install();
   int state = 0;
   char buf[256];
-  snprintf(buf, sizeof(buf), "$TKR_ENGINE = %d; $TKR_NATIVE = true", cfg->engine);
+  snprintf(buf, sizeof(buf), "$TKR_ENGINE = %d; $TKR_NATIVE = true; $TKR_LOG_STDOUT = %s", cfg->engine,
+           cfg->log_stdout ? "true" : "false");
   rb_eval_string_protect(buf, &state);
   rb_eval_string_protect(PRELUDE, &state);
   if (state) { report_exception("prelude"); return 1; }

@@ -1,7 +1,7 @@
 # Compatibility shims: RGSS2 targets Ruby 1.8, RGSS3 targets Ruby 1.9.
 # This runtime uses Ruby 3.4, so restore commonly used removed APIs.
 require 'js' unless $TKR_NATIVE
-require 'zlib'
+require 'zlib' unless defined?(Zlib)
 
 $stdout.sync = true
 $stderr.sync = true
